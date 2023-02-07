@@ -65,7 +65,10 @@ fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<Event
         .map(|track_event| Event {
             delta: track_event.delta.into(),
             kind: match track_event.kind {
-                midly::TrackEventKind::Midi { channel: _, message } => match message {
+                midly::TrackEventKind::Midi {
+                    channel: _,
+                    message,
+                } => match message {
                     midly::MidiMessage::NoteOff { key, vel: _ } => Some(EventKind::NoteUpdate {
                         key: key.into(),
                         vel: 0,
@@ -78,8 +81,12 @@ fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<Event
                 },
                 midly::TrackEventKind::Meta(m) => match m {
                     midly::MetaMessage::Tempo(t) => Some(EventKind::TempoUpdate(t.into())),
-                    midly::MetaMessage::TrackName(bytes) => Some(EventKind::TrackName(String::from_utf8_lossy(bytes).to_string())),
-                    midly::MetaMessage::InstrumentName(bytes) => Some(EventKind::TrackInstrument(String::from_utf8_lossy(bytes).to_string())),
+                    midly::MetaMessage::TrackName(bytes) => Some(EventKind::TrackName(
+                        String::from_utf8_lossy(bytes).to_string(),
+                    )),
+                    midly::MetaMessage::InstrumentName(bytes) => Some(EventKind::TrackInstrument(
+                        String::from_utf8_lossy(bytes).to_string(),
+                    )),
                     _ => None,
                 },
                 _ => None,
@@ -130,16 +137,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let (ticks_per_beat, tick): (u32, Duration) = midi::deduce_timing(&midi_file.header.timing);
 
-    println!("file contains {} track(s), listing...", midi_file.tracks.len());
-    let tracks = midi_file.tracks.iter().map(convert).collect::<Vec<Vec<_>>>();
+    println!(
+        "file contains {} track(s), listing...",
+        midi_file.tracks.len()
+    );
+    let tracks = midi_file
+        .tracks
+        .iter()
+        .map(convert)
+        .collect::<Vec<Vec<_>>>();
 
-    for (i,track) in tracks.iter().enumerate() {
+    for (i, track) in tracks.iter().enumerate() {
         let name = get_track_name(track).unwrap_or("Unknown");
         let instrument = get_track_instrument(track).unwrap_or("Unknown");
 
         println!("{i} - name: {name} - instrument: {instrument}");
     }
-
 
     if playlist_order.is_empty() {
         println!("no playlist was specified. Quitting");
@@ -156,7 +169,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
     let current_instruments = Arc::new(AtomicU32::from(0));
     let max_instruments = Arc::new(AtomicU32::from(0));
-
 
     let f = futures::future::join_all(playlist.into_iter().map(|track| {
         tokio::task::spawn(play_track(
@@ -205,9 +217,17 @@ async fn play_track<I: IntoIterator<Item = Event>>(
 
                     if vel != 0 {
                         current_instruments.fetch_add(1, Ordering::SeqCst);
-                        if current_instruments.load(Ordering::SeqCst) > max_instruments.load(Ordering::SeqCst) {
-                            max_instruments.store(current_instruments.load(Ordering::SeqCst), Ordering::SeqCst);
-                            println!("new maximum notes: {}", max_instruments.load(Ordering::SeqCst));
+                        if current_instruments.load(Ordering::SeqCst)
+                            > max_instruments.load(Ordering::SeqCst)
+                        {
+                            max_instruments.store(
+                                current_instruments.load(Ordering::SeqCst),
+                                Ordering::SeqCst,
+                            );
+                            println!(
+                                "new maximum notes: {}",
+                                max_instruments.load(Ordering::SeqCst)
+                            );
                         }
                     } else {
                         current_instruments.fetch_sub(1, Ordering::SeqCst);
@@ -219,8 +239,8 @@ async fn play_track<I: IntoIterator<Item = Event>>(
 
                     tick_microseconds.store(us_per_tick, Ordering::SeqCst);
                     println!("tick is now {us_per_tick} µs");
-                },
-                _ => ()
+                }
+                _ => (),
             }
         }
         let cycle_end = tokio::time::Instant::now();
