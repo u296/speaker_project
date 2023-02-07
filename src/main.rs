@@ -222,30 +222,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                 },
                 _ => ()
             },
-            _ => (), /*midly::TrackEventKind::Midi { channel, message } => {
-                         // TODO allowed channel check
-                         match message {
-                             midly::MidiMessage::NoteOff { key, vel } => {
-                                 let mut device_lock = device.lock().await;
-                                 device_lock.transmit_message_async(key.into(), 0).await?;
-                             }
-                             midly::MidiMessage::NoteOn { key, vel } => {
-                                 let mut device_lock = device.lock().await;
-                                 device_lock
-                                     .transmit_message_async(key.into(), vel.into())
-                                     .await?;
-                             }
-                             _ => (),
-                         }
-                     }
-                     midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(t)) => {
-                         let us_per_beat: u32 = t.into();
-                         let tick_us = us_per_beat / ticks_per_beat;
-
-                         tick_microseconds.store(tick_us, Ordering::SeqCst);
-                         println!("tick is now {} µs", tick_us);
-                     }
-                     _ => (),*/
+            _ => (),
         }
         let cycle_end = tokio::time::Instant::now();
         last_cycle_duration = cycle_end - cycle_begin;
