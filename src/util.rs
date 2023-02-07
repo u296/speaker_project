@@ -27,7 +27,12 @@ pub fn key_to_frequency(key: u8) -> u16 {
     octave_8_freqs[note] / 2u16.pow(8 - octave)
 }
 
-pub fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: Fn(&T) -> bool>(
+pub fn read_input<
+    T,
+    ParseError,
+    Parser: Fn(&str) -> Result<T, ParseError>,
+    Filter: Fn(&T) -> bool,
+>(
     prompt: &str,
     parse: Parser,
     accept: Filter,

@@ -9,8 +9,8 @@ use clap::Parser;
 
 use midly::Smf;
 
-mod util;
 mod device;
+mod util;
 
 /* message format sent to device
 big endian transmission format
@@ -25,10 +25,7 @@ x: u16 tone
 y: u16 velocity
  */
 
-
-
 // c5 = 72
-
 
 #[derive(Parser)]
 struct Args {
@@ -43,10 +40,7 @@ struct Args {
     tracks: Vec<usize>,
 }
 
-
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     let (file_path, baud_rate, allowed_channels, playlist_order) = {
         let args = Args::parse();
 
@@ -69,25 +63,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ticks_per_beat, mut tick): (u64, Duration) = match midi.header.timing {
         midly::Timing::Metrical(a) => {
             println!("timing = metrical: {}", a);
-			
-			let ticks_per_beat = <midly::num::u15 as Into<u16>>::into(a).into();
-			let tick = Duration::from_micros(500);
 
-			println!("ticks per beat: {}", ticks_per_beat);
-			println!("assuming initial tick: {} µs", tick.as_micros());
-            
+            let ticks_per_beat = <midly::num::u15 as Into<u16>>::into(a).into();
+            let tick = Duration::from_micros(500);
+
+            println!("ticks per beat: {}", ticks_per_beat);
+            println!("assuming initial tick: {} µs", tick.as_micros());
+
             (ticks_per_beat, tick)
         }
         midly::Timing::Timecode(fps, subframe) => {
             println!("timing = timecode: {}, {}", fps.as_int(), subframe);
-			
-			let ticks_per_beat = subframe as u64;
-            let tick = Duration::from_micros(1000000 / (fps.as_int() as u64 * subframe as u64));
-			
-			println!("ticks per beat: {}", ticks_per_beat);
-			println!("initial tick: {} µs", tick.as_micros());
 
-			(ticks_per_beat, tick)
+            let ticks_per_beat = subframe as u64;
+            let tick = Duration::from_micros(1000000 / (fps.as_int() as u64 * subframe as u64));
+
+            println!("ticks per beat: {}", ticks_per_beat);
+            println!("initial tick: {} µs", tick.as_micros());
+
+            (ticks_per_beat, tick)
         }
     };
 
@@ -98,11 +92,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
-	let mut device = device::Device::new(baud_rate)?;
+    let mut device = device::Device::new(baud_rate)?;
 
     let playlist: Vec<_> = playlist_order.iter().map(|x| &midi.tracks[*x]).collect();
-
-    
 
     for track in playlist.iter() {
         for trackevent in track.iter() {
@@ -139,5 +131,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-

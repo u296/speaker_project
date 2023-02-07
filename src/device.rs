@@ -29,25 +29,23 @@ impl Device {
         };
 
         let dev_name = ports[selection].port_name.split('/').last().unwrap();
-		let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
+        let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
 
         println!("selected device {}", dev_name);
 
         println!("baudrate: {}", baud_rate);
         println!("opening device at {}", dev_path.to_string_lossy());
 
-        Ok(Self(tokio_serial::new(dev_path.to_string_lossy(), baud_rate).open()?))
+        Ok(Self(
+            tokio_serial::new(dev_path.to_string_lossy(), baud_rate).open()?,
+        ))
     }
 
-    pub fn transmit_message(
-        &mut self,
-        key: u8,
-        vel: u8,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn transmit_message(&mut self, key: u8, vel: u8) -> Result<(), Box<dyn std::error::Error>> {
         let freq = util::key_to_frequency(key).to_be_bytes();
-    
+
         //println!("{}    {}", key, vel);
-    
+
         let message: [u8; 4] = [0x01, freq[0], freq[1], vel.into()];
         let mut i = 1;
         loop {
