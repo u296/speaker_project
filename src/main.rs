@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use clap::Parser;
 
@@ -112,15 +109,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(t)) => {
-                        // t microseconds per beat
+                    // t microseconds per beat
 
-                        tick = std::time::Duration::from_micros(
-                            <midly::num::u24 as Into<u32>>::into(t) as u64 / ticks_per_beat,
-                        );
+                    tick = std::time::Duration::from_micros(
+                        <midly::num::u24 as Into<u32>>::into(t) as u64 / ticks_per_beat,
+                    );
 
-                        println!("tick is now {} µs", tick.as_micros());
-                    }
-                
+                    println!("tick is now {} µs", tick.as_micros());
+                }
+
                 _ => (),
             }
         }
