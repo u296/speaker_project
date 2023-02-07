@@ -45,13 +45,18 @@ struct Args {
     tracks: Vec<usize>,
 }
 
+#[derive(Debug, Clone)]
 struct Event {
     delta: u32,
     kind: Option<EventKind>,
 }
+
+#[derive(Debug, Clone)]
 enum EventKind {
     NoteUpdate { key: u8, vel: u8 },
     TempoUpdate(u32),
+    TrackName(String),
+    TrackInstrument(String),
 }
 
 fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<Event>>(track: I) -> B {
@@ -71,13 +76,35 @@ fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<Event
                     }),
                     _ => None,
                 },
-                midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(t)) => {
-                    Some(EventKind::TempoUpdate(t.into()))
-                }
+                midly::TrackEventKind::Meta(m) => match m {
+                    midly::MetaMessage::Tempo(t) => Some(EventKind::TempoUpdate(t.into())),
+                    midly::MetaMessage::TrackName(bytes) => Some(EventKind::TrackName(String::from_utf8_lossy(bytes).to_string())),
+                    midly::MetaMessage::InstrumentName(bytes) => Some(EventKind::TrackInstrument(String::from_utf8_lossy(bytes).to_string())),
+                    _ => None,
+                },
                 _ => None,
             },
         })
         .collect()
+}
+
+fn get_track_name<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&'a str> {
+    for event in i {
+        if let Some(EventKind::TrackName(name)) = &event.kind {
+            return Some(name);
+        }
+    }
+
+    None
+}
+fn get_track_instrument<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&'a str> {
+    for event in i {
+        if let Some(EventKind::TrackInstrument(name)) = &event.kind {
+            return Some(name);
+        }
+    }
+
+    None
 }
 
 #[tokio::main]
@@ -103,7 +130,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let (ticks_per_beat, tick): (u32, Duration) = midi::deduce_timing(&midi_file.header.timing);
 
-    println!("file contains {} track(s)", midi_file.tracks.len());
+    println!("file contains {} track(s), listing...", midi_file.tracks.len());
+    let tracks = midi_file.tracks.iter().map(convert).collect::<Vec<Vec<_>>>();
+
+    for (i,track) in tracks.iter().enumerate() {
+        let name = get_track_name(track).unwrap_or("Unknown");
+        let instrument = get_track_instrument(track).unwrap_or("Unknown");
+
+        println!("{} - name: {} - instrument: {}", i, name, instrument);
+    }
+
 
     if playlist_order.is_empty() {
         println!("no playlist was specified. Quitting");
@@ -114,10 +150,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let playlist = playlist_order
         .iter()
-        .map(|x| convert::<_, Vec<_>>(&midi_file.tracks[*x]))
+        .map(|i| tracks[*i].clone())
         .collect::<Vec<_>>();
 
     let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
+    let current_instruments = Arc::new(AtomicU32::from(0));
+    let max_instruments = Arc::new(AtomicU32::from(0));
+
 
     let f = futures::future::join_all(playlist.into_iter().map(|track| {
         tokio::task::spawn(play_track(
@@ -125,6 +164,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ticks_per_beat,
             tick_microseconds.clone(),
             device.clone(),
+            current_instruments.clone(),
+            max_instruments.clone(),
         ))
     }));
 
@@ -145,6 +186,8 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     ticks_per_beat: u32,
     tick_microseconds: Arc<AtomicU32>,
     device: Arc<Mutex<Device>>,
+    current_instruments: Arc<AtomicU32>,
+    max_instruments: Arc<AtomicU32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut last_cycle_duration = Duration::from_secs(0);
     for track_event in track {
@@ -159,6 +202,16 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                 EventKind::NoteUpdate { key, vel } => {
                     let mut device_lock = device.lock().await;
                     device_lock.transmit_message_async(key, vel).await?;
+
+                    if vel != 0 {
+                        current_instruments.fetch_add(1, Ordering::SeqCst);
+                        if current_instruments.load(Ordering::SeqCst) > max_instruments.load(Ordering::SeqCst) {
+                            max_instruments.store(current_instruments.load(Ordering::SeqCst), Ordering::SeqCst);
+                            println!("new maximum notes: {}", max_instruments.load(Ordering::SeqCst));
+                        }
+                    } else {
+                        current_instruments.fetch_sub(1, Ordering::SeqCst);
+                    }
                 }
                 EventKind::TempoUpdate(t) => {
                     let us_per_beat = t;
@@ -166,7 +219,8 @@ async fn play_track<I: IntoIterator<Item = Event>>(
 
                     tick_microseconds.store(us_per_tick, Ordering::SeqCst);
                     println!("tick is now {} µs", us_per_tick);
-                }
+                },
+                _ => ()
             },
             _ => (), /*midly::TrackEventKind::Midi { channel, message } => {
                          // TODO allowed channel check
