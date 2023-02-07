@@ -65,7 +65,7 @@ fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<Event
         .map(|track_event| Event {
             delta: track_event.delta.into(),
             kind: match track_event.kind {
-                midly::TrackEventKind::Midi { channel, message } => match message {
+                midly::TrackEventKind::Midi { channel: _, message } => match message {
                     midly::MidiMessage::NoteOff { key, vel: _ } => Some(EventKind::NoteUpdate {
                         key: key.into(),
                         vel: 0,
@@ -109,7 +109,7 @@ fn get_track_instrument<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (file_path, baud_rate, allowed_channels, playlist_order) = {
+    let (file_path, baud_rate, _allowed_channels, playlist_order) = {
         let args = Args::parse();
 
         (
