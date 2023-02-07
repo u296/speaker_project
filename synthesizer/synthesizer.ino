@@ -103,7 +103,10 @@ void loop()
 					break;
 				}
 			}
-			// speaker should be active now
+			/*	speaker should be active now,
+				but if there are more notes active than speakers
+				some notes will not be played
+			*/
 		}
 
 		break;
