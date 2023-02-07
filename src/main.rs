@@ -29,7 +29,7 @@ struct Args {
     #[arg(short, long, default_value_t = 250000)]
     baudrate: u32,
 
-    #[arg(long, num_args = 0..)]
+    #[arg(long, num_args = 1..)]
     channels: Vec<u8>,
 
     #[arg(long, num_args = 1..)]
