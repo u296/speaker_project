@@ -36,7 +36,7 @@ pub fn read_input<
     prompt: &str,
     parse: Parser,
     accept: Filter,
-) -> Result<T, Box<dyn std::error::Error>> {
+) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
     let mut s = String::new();
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();

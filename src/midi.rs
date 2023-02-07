@@ -1,11 +1,9 @@
 use std::time::Duration;
 
-use midly::{Timing};
+use midly::Timing;
 
-
-
-pub fn deduce_timing(timing: &Timing) -> (u64, Duration) {
-    match timing{
+pub fn deduce_timing(timing: &Timing) -> (u32, Duration) {
+    match timing {
         midly::Timing::Metrical(a) => {
             println!("timing = metrical: {}", a);
 
@@ -20,7 +18,7 @@ pub fn deduce_timing(timing: &Timing) -> (u64, Duration) {
         midly::Timing::Timecode(fps, subframe) => {
             println!("timing = timecode: {}, {}", fps.as_int(), subframe);
 
-            let ticks_per_beat = *subframe as u64;
+            let ticks_per_beat = *subframe as u32;
             let tick = Duration::from_micros(1000000 / (fps.as_int() as u64 * *subframe as u64));
 
             println!("ticks per beat: {}", ticks_per_beat);

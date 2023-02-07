@@ -1,11 +1,13 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{io::Write, path::PathBuf, str::FromStr};
+
+use tokio_serial::SerialStream;
 
 use crate::util;
 
-pub struct Device(Box<dyn tokio_serial::SerialPort>);
+pub struct Device(SerialStream);
 
 impl Device {
-    pub fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let ports = tokio_serial::available_ports()?;
 
         println!("listing available serial ports...");
@@ -36,22 +38,27 @@ impl Device {
         println!("baudrate: {}", baud_rate);
         println!("opening device at {}", dev_path.to_string_lossy());
 
-        Ok(Self(
-            tokio_serial::new(dev_path.to_string_lossy(), baud_rate).open()?,
-        ))
+        Ok(Self(SerialStream::open(&tokio_serial::new(
+            dev_path.to_string_lossy(),
+            baud_rate,
+        ))?))
     }
 
-    pub fn transmit_message(&mut self, key: u8, vel: u8) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn transmit_message_async(
+        &mut self,
+        key: u8,
+        vel: u8,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let freq = util::key_to_frequency(key).to_be_bytes();
 
         let message: [u8; 4] = [0x01, freq[0], freq[1], vel];
         let mut i = 1;
         loop {
-            match self.0.write_all(&message) {
+            match <_ as tokio::io::AsyncWriteExt>::write_all(&mut self.0, &message).await {
                 Ok(_) => return Ok(()),
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
-                    _ => return Err(e.into()),
+                    _ => return Err(Box::new(e)),
                 },
             }
             i += 1;
