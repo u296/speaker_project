@@ -23,13 +23,13 @@ y: u16 velocity
  */
 
 fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: Fn(&T) -> bool>(
-    stdin: &Stdin,
-    stdout: &mut Stdout,
     prompt: &str,
     parse: Parser,
     accept: Filter,
 ) -> Result<T, Box<dyn std::error::Error>> {
     let mut s = String::new();
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout();
     loop {
         stdout.write_all(prompt.as_bytes())?;
         stdout.flush()?;
@@ -85,9 +85,55 @@ struct Args {
     tracks: Vec<usize>,
 }
 
+struct Device(Box<dyn tokio_serial::SerialPort>);
+
+impl Device {
+    fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        let ports = tokio_serial::available_ports()?;
+
+        println!("listing available serial ports...");
+
+        ports
+            .iter()
+            .enumerate()
+            .for_each(|(i, p)| println!("{}: {}", i, p.port_name.split('/').last().unwrap()));
+
+        if ports.is_empty() {
+            println!("no available serial ports");
+            std::process::exit(1);
+        }
+
+        let selection: usize = {
+            if ports.len() == 1 {
+                0
+            } else {
+                read_input("selection: ", FromStr::from_str, |n| *n < ports.len())?
+            }
+        };
+
+        let dev_name = ports[selection].port_name.split('/').last().unwrap();
+		let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
+
+        println!("selected device {}", dev_name);
+
+        println!("baudrate: {}", baud_rate);
+        println!("opening device at {}", dev_path.to_string_lossy());
+
+        Ok(Self(tokio_serial::new(dev_path.to_string_lossy(), baud_rate).open()?))
+    }
+}
+
+impl Write for Device {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		self.0.write(buf)
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> {
+		self.0.flush()
+	}
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
 
     let (file_path, baud_rate, allowed_channels, playlist_order) = {
         let args = Args::parse();
@@ -110,15 +156,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let midi = Smf::parse(&file_buf)?;
 
-    let ticks_per_beat: u64 = match midi.header.timing {
+    let (ticks_per_beat, mut tick): (u64, Duration) = match midi.header.timing {
         midly::Timing::Metrical(a) => {
-            let x = <midly::num::u15 as Into<u16>>::into(a).into();
-            eprintln!("metrical: {}", x);
-            x
+            println!("timing = metrical: {}", a);
+			
+			let ticks_per_beat = <midly::num::u15 as Into<u16>>::into(a).into();
+			let tick = Duration::from_micros(500);
+
+			println!("ticks per beat: {}", ticks_per_beat);
+			println!("assuming initial tick: {} µs", tick.as_micros());
+            
+            (ticks_per_beat, tick)
         }
-        midly::Timing::Timecode(_, _) => {
-            eprintln!("timecode");
-            10
+        midly::Timing::Timecode(fps, subframe) => {
+            println!("timing = timecode: {}, {}", fps.as_int(), subframe);
+			
+			let ticks_per_beat = subframe as u64;
+            let tick = Duration::from_micros(1000000 / (fps.as_int() as u64 * subframe as u64));
+			
+			println!("ticks per beat: {}", ticks_per_beat);
+			println!("initial tick: {} µs", tick.as_micros());
+
+			(ticks_per_beat, tick)
         }
     };
 
@@ -129,43 +188,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
+	let mut device = Device::new(baud_rate)?;
+
     let playlist: Vec<_> = playlist_order.iter().map(|x| &midi.tracks[*x]).collect();
 
-    let mut tick = Duration::from_micros(500);
-
-    let ports = tokio_serial::available_ports()?;
-
-    println!("listing available serial ports...");
-
-    ports
-        .iter()
-        .enumerate()
-        .for_each(|(i, p)| println!("{}: {}", i, p.port_name.split('/').last().unwrap()));
-
-    if ports.is_empty() {
-        println!("no available serial ports");
-        std::process::exit(1);
-    }
-
-    let selection: usize = {
-        if ports.len() == 1 {
-            0
-        } else {
-            read_input(&stdin, &mut stdout, "selection: ", FromStr::from_str, |n| {
-                *n < ports.len()
-            })?
-        }
-    };
-
-    let dev_name = ports[selection].port_name.split('/').last().unwrap();
-    let dev_path = format!("/dev/{}", dev_name);
-
-    println!("selected device {}", dev_name);
-
-    println!("baudrate: {}", baud_rate);
-    println!("opening device at {}", dev_path);
-
-    let mut device = tokio_serial::new(&dev_path, baud_rate).open()?;
+    
 
     for track in playlist.iter() {
         for trackevent in track.iter() {
@@ -175,51 +202,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if allowed_channels.contains(&channel.into()) {
                         match message {
                             midly::MidiMessage::NoteOff { key, vel: _ } => {
-                                let freq = key_to_frequency(key.into()).to_be_bytes();
-
-                                let message: [u8; 4] = [0x01, freq[0], freq[1], 0x00];
-
-                                let mut i = 1;
-
-                                loop {
-                                    match device.write_all(&message) {
-                                        Ok(_) => break,
-                                        Err(e) => match e.kind() {
-                                            std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
-                                            _ => Err(e)?,
-                                        },
-                                    }
-                                    i += 1;
-                                }
+                                transmit_message(key.into(), 0, &mut device)?;
                             }
                             midly::MidiMessage::NoteOn { key, vel } => {
-                                let freq = key_to_frequency(key.into()).to_be_bytes();
-
-                                println!(
-                                    "{}    {}",
-                                    <midly::num::u7 as Into<u8>>::into(key),
-                                    <midly::num::u7 as Into<u8>>::into(vel)
-                                );
-
-                                let message: [u8; 4] = [0x01, freq[0], freq[1], vel.into()];
-                                let mut i = 1;
-                                loop {
-                                    match device.write_all(&message) {
-                                        Ok(_) => break,
-                                        Err(e) => match e.kind() {
-                                            std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
-                                            _ => Err(e)?,
-                                        },
-                                    }
-                                    i += 1;
-                                }
+                                transmit_message(key.into(), vel.into(), &mut device)?;
                             }
                             _ => (),
                         }
                     }
                 }
-                midly::TrackEventKind::SysEx(_) => (),
-                midly::TrackEventKind::Escape(_) => (),
                 midly::TrackEventKind::Meta(m) => {
                     if let midly::MetaMessage::Tempo(t) = m {
                         // t microseconds per beat
@@ -228,12 +219,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             <midly::num::u24 as Into<u32>>::into(t) as u64 / ticks_per_beat,
                         );
 
-                        println!("tick is now {} microseconds", tick.as_micros());
+                        println!("tick is now {} µs", tick.as_micros());
                     }
                 }
+                _ => (),
             }
         }
     }
 
     Ok(())
+}
+
+fn transmit_message<W: Write>(
+    key: u8,
+    vel: u8,
+    device: &mut W,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let freq = key_to_frequency(key).to_be_bytes();
+
+    //println!("{}    {}", key, vel);
+
+    let message: [u8; 4] = [0x01, freq[0], freq[1], vel.into()];
+    let mut i = 1;
+    loop {
+        match device.write_all(&message) {
+            Ok(_) => return Ok(()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
+                _ => return Err(e.into()),
+            },
+        }
+        i += 1;
+    }
 }
