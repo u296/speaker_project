@@ -1,4 +1,4 @@
-use std::{io::Write, path::PathBuf, str::FromStr};
+use std::{path::PathBuf, str::FromStr};
 
 use tokio_serial::SerialStream;
 
@@ -33,9 +33,9 @@ impl Device {
         let dev_name = ports[selection].port_name.split('/').last().unwrap();
         let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
 
-        println!("selected device {}", dev_name);
+        println!("selected device {dev_name}");
 
-        println!("baudrate: {}", baud_rate);
+        println!("baudrate: {baud_rate}");
         println!("opening device at {}", dev_path.to_string_lossy());
 
         Ok(Self(SerialStream::open(&tokio_serial::new(
@@ -57,7 +57,7 @@ impl Device {
             match <_ as tokio::io::AsyncWriteExt>::write_all(&mut self.0, &message).await {
                 Ok(_) => return Ok(()),
                 Err(e) => match e.kind() {
-                    std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
+                    std::io::ErrorKind::TimedOut => eprintln!("timed out {i}"),
                     _ => return Err(Box::new(e)),
                 },
             }

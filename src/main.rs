@@ -137,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let name = get_track_name(track).unwrap_or("Unknown");
         let instrument = get_track_instrument(track).unwrap_or("Unknown");
 
-        println!("{} - name: {} - instrument: {}", i, name, instrument);
+        println!("{i} - name: {name} - instrument: {instrument}");
     }
 
 
@@ -197,8 +197,8 @@ async fn play_track<I: IntoIterator<Item = Event>>(
         )
         .await;
         let cycle_begin = tokio::time::Instant::now();
-        match track_event.kind {
-            Some(e) => match e {
+        if let Some(e) = track_event.kind {
+            match e {
                 EventKind::NoteUpdate { key, vel } => {
                     let mut device_lock = device.lock().await;
                     device_lock.transmit_message_async(key, vel).await?;
@@ -218,11 +218,10 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     let us_per_tick = us_per_beat / ticks_per_beat;
 
                     tick_microseconds.store(us_per_tick, Ordering::SeqCst);
-                    println!("tick is now {} µs", us_per_tick);
+                    println!("tick is now {us_per_tick} µs");
                 },
                 _ => ()
-            },
-            _ => (),
+            }
         }
         let cycle_end = tokio::time::Instant::now();
         last_cycle_duration = cycle_end - cycle_begin;
