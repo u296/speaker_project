@@ -147,11 +147,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
 
-    /*let () = {
+    let (file_path, baud_rate, allowed_channels, playlist_order) = {
         let args = Args::parse();
 
-        (filepath, baudrate, channels, tracks)
-    };*/
+        (
+            args.file,
+            args.baudrate,
+            if args.channels.is_empty() {
+                (0..=255).into_iter().collect()
+            } else {
+                args.channels
+            },
+            args.tracks,
+        )
+    };
+
+    let mut file_buf = Vec::new();
+    let mut file = std::fs::File::open(&file_path)?;
+    file.read_to_end(&mut file_buf)?;
+
+    let midi = Smf::parse(&file_buf)?;
+
+    let ticks_per_beat: u64 = match midi.header.timing {
+        midly::Timing::Metrical(a) => {
+            let x = <midly::num::u15 as Into<u16>>::into(a).into();
+            eprintln!("metrical: {}", x);
+            x
+        }
+        midly::Timing::Timecode(_, _) => {
+            eprintln!("timecode");
+            10
+        }
+    };
+
+    println!("file contains {} track(s)", midi.tracks.len());
+
+    if playlist_order.is_empty() {
+        println!("no playlist was specified. Quitting");
+        std::process::exit(0);
+    }
+
+    let playlist: Vec<_> = playlist_order.iter().map(|x| &midi.tracks[*x]).collect();
+
+    let mut tick = Duration::from_micros(500);
 
     let ports = tokio_serial::available_ports()?;
 
@@ -182,73 +220,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("selected device {}", dev_name);
 
-    let baud_rate: u32 = 250000; /*read_input(
-                                     &stdin,
-                                     &mut stdout,
-                                     "baud rate: ",
-                                     FromStr::from_str,
-                                     |_| true,
-                                 )?;*/
-
-    println!("assuming baudrate: {}", baud_rate);
+    println!("baudrate: {}", baud_rate);
     println!("opening device at {}", dev_path);
 
     let mut device = tokio_serial::new(&dev_path, baud_rate).open()?;
-
-    let file_path: PathBuf = read_input(
-        &stdin,
-        &mut stdout,
-        "file to play: ",
-        FromStr::from_str,
-        |x: &PathBuf| x.is_file(),
-    )?;
-
-    let mut file_buf = Vec::new();
-    let mut file = std::fs::File::open(&file_path)?;
-    file.read_to_end(&mut file_buf)?;
-
-    let midi = Smf::parse(&file_buf)?;
-
-    let ticks_per_beat: u64 = match midi.header.timing {
-        midly::Timing::Metrical(a) => {
-            let x = <midly::num::u15 as Into<u16>>::into(a).into();
-            eprintln!("metrical: {}", x);
-            x
-        }
-        midly::Timing::Timecode(_, _) => {
-            eprintln!("timecode");
-            10
-        }
-    };
-
-    println!("select allowed channels (no input to allow all)");
-    let allowed_channels: Vec<u8> =
-        read_input_multiple(&stdin, &mut stdout, "channel: ", FromStr::from_str, |_| {
-            true
-        })?;
-
-    let allowed_channels = {
-        if allowed_channels.is_empty() {
-            (0..=255).into_iter().collect()
-        } else {
-            allowed_channels
-        }
-    };
-
-    println!("file contains {} track(s)", midi.tracks.len());
-    println!("select order of tracks to play");
-    let playlist: Vec<&Track> = read_input_multiple::<usize, _, _, _>(
-        &stdin,
-        &mut stdout,
-        "track: ",
-        FromStr::from_str,
-        |x| *x < midi.tracks.len(),
-    )?
-    .iter()
-    .map(|x| &midi.tracks[*x])
-    .collect();
-
-    let mut tick = Duration::from_micros(500);
 
     for track in playlist.iter() {
         for trackevent in track.iter() {
