@@ -5,6 +5,7 @@ use clap::Parser;
 use midly::Smf;
 
 mod device;
+mod midi;
 mod util;
 
 /* message format sent to device
@@ -53,34 +54,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file_buf = std::fs::read(&file_path)?;
 
-    let midi = Smf::parse(&file_buf)?;
+    let midi_file = Smf::parse(&file_buf)?;
 
-    let (ticks_per_beat, mut tick): (u64, Duration) = match midi.header.timing {
-        midly::Timing::Metrical(a) => {
-            println!("timing = metrical: {}", a);
+    let (ticks_per_beat, mut tick): (u64, Duration) = midi::deduce_timing(&midi_file.header.timing);
 
-            let ticks_per_beat = <midly::num::u15 as Into<u16>>::into(a).into();
-            let tick = Duration::from_micros(500);
-
-            println!("ticks per beat: {}", ticks_per_beat);
-            println!("assuming initial tick: {} µs", tick.as_micros());
-
-            (ticks_per_beat, tick)
-        }
-        midly::Timing::Timecode(fps, subframe) => {
-            println!("timing = timecode: {}, {}", fps.as_int(), subframe);
-
-            let ticks_per_beat = subframe as u64;
-            let tick = Duration::from_micros(1000000 / (fps.as_int() as u64 * subframe as u64));
-
-            println!("ticks per beat: {}", ticks_per_beat);
-            println!("initial tick: {} µs", tick.as_micros());
-
-            (ticks_per_beat, tick)
-        }
-    };
-
-    println!("file contains {} track(s)", midi.tracks.len());
+    println!("file contains {} track(s)", midi_file.tracks.len());
 
     if playlist_order.is_empty() {
         println!("no playlist was specified. Quitting");
@@ -89,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut device = device::Device::new(baud_rate)?;
 
-    let playlist: Vec<_> = playlist_order.iter().map(|x| &midi.tracks[*x]).collect();
+    let playlist: Vec<_> = playlist_order.iter().map(|x| &midi_file.tracks[*x]).collect();
 
     for track in playlist.iter() {
         for trackevent in track.iter() {
