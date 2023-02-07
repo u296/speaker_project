@@ -38,7 +38,6 @@ void setup()
 
 	pinMode(LED_BUILTIN, OUTPUT);
 	Serial.begin(250000);
-	Serial.setTimeout(1); // high timeout is not necessary with such a high baudrate
 }
 
 #define SERIAL_BUFFER_LEN 64
@@ -46,16 +45,13 @@ byte buf[SERIAL_BUFFER_LEN];
 
 void loop()
 {
-
 	while (!Serial.available())
 	{
 	}
-	memset(buf, 0, SERIAL_BUFFER_LEN);
+	
 	digitalWrite(LED_BUILTIN, LOW);
-	/*
-	Serial.readBytes((char*)buf, SERIAL_BUFFER_LEN);*/
 
-	// might be better to manually read bytes here instead to avoid timeout
+	memset(buf, 0, SERIAL_BUFFER_LEN);
 
 	for (int i = 0; i < SERIAL_BUFFER_LEN && Serial.available(); i++)
 	{
