@@ -32,7 +32,6 @@ struct Speaker
 {
 	HardwareTimer *timer;
 	int channel;
-	int pin;
 	PinName pin_name;
 	int frequency = 0;
 };
@@ -45,14 +44,12 @@ void setup()
 	// set up the speakers
 
 	// PA2 TIM5 chan 3 (alt1)
-	speakers[0].pin = PA2;
 	speakers[0].pin_name = PA_2_ALT1;
 	speakers[0].channel = 3;
 	speakers[0].timer = new HardwareTimer(TIM5);
 
 	// PA6 TIM3 chan 1
 
-	speakers[1].pin = PA6;
 	speakers[1].pin_name = PA_6;
 	speakers[1].channel = 1;
 	speakers[1].timer = new HardwareTimer(TIM3);
