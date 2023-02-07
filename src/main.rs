@@ -9,6 +9,9 @@ use clap::Parser;
 
 use midly::Smf;
 
+mod util;
+mod device;
+
 /* message format sent to device
 big endian transmission format
 first byte: message type
@@ -22,55 +25,10 @@ x: u16 tone
 y: u16 velocity
  */
 
-fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: Fn(&T) -> bool>(
-    prompt: &str,
-    parse: Parser,
-    accept: Filter,
-) -> Result<T, Box<dyn std::error::Error>> {
-    let mut s = String::new();
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
-    loop {
-        stdout.write_all(prompt.as_bytes())?;
-        stdout.flush()?;
 
-        stdin.read_line(&mut s)?;
-
-        if let Ok(x) = parse(s.trim()) {
-            if accept(&x) {
-                break Ok(x);
-            }
-        }
-        s.clear();
-    }
-}
 
 // c5 = 72
-fn key_to_frequency(key: u8) -> u16 {
-    let note = key as usize % 12;
-    let octave = key as u32 / 12;
 
-    /* notes modulus
-    0 C
-    1 C#
-    2 D
-    3 D#
-    4 E
-    5 F
-    6 F#
-    7 G
-    8 G#
-    9 A
-    10 A#
-    11 B
-     */
-
-    let octave_8_freqs = [
-        4186, 4434, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902,
-    ];
-
-    octave_8_freqs[note] / 2u16.pow(8 - octave)
-}
 
 #[derive(Parser)]
 struct Args {
@@ -85,53 +43,7 @@ struct Args {
     tracks: Vec<usize>,
 }
 
-struct Device(Box<dyn tokio_serial::SerialPort>);
 
-impl Device {
-    fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error>> {
-        let ports = tokio_serial::available_ports()?;
-
-        println!("listing available serial ports...");
-
-        ports
-            .iter()
-            .enumerate()
-            .for_each(|(i, p)| println!("{}: {}", i, p.port_name.split('/').last().unwrap()));
-
-        if ports.is_empty() {
-            println!("no available serial ports");
-            std::process::exit(1);
-        }
-
-        let selection: usize = {
-            if ports.len() == 1 {
-                0
-            } else {
-                read_input("selection: ", FromStr::from_str, |n| *n < ports.len())?
-            }
-        };
-
-        let dev_name = ports[selection].port_name.split('/').last().unwrap();
-		let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
-
-        println!("selected device {}", dev_name);
-
-        println!("baudrate: {}", baud_rate);
-        println!("opening device at {}", dev_path.to_string_lossy());
-
-        Ok(Self(tokio_serial::new(dev_path.to_string_lossy(), baud_rate).open()?))
-    }
-}
-
-impl Write for Device {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-		self.0.write(buf)
-	}
-
-	fn flush(&mut self) -> std::io::Result<()> {
-		self.0.flush()
-	}
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -150,9 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     };
 
-    let mut file_buf = Vec::new();
-    let mut file = std::fs::File::open(&file_path)?;
-    file.read_to_end(&mut file_buf)?;
+    let mut file_buf = std::fs::read(&file_path)?;
 
     let midi = Smf::parse(&file_buf)?;
 
@@ -188,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
-	let mut device = Device::new(baud_rate)?;
+	let mut device = device::Device::new(baud_rate)?;
 
     let playlist: Vec<_> = playlist_order.iter().map(|x| &midi.tracks[*x]).collect();
 
@@ -202,10 +112,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if allowed_channels.contains(&channel.into()) {
                         match message {
                             midly::MidiMessage::NoteOff { key, vel: _ } => {
-                                transmit_message(key.into(), 0, &mut device)?;
+                                device.transmit_message(key.into(), 0)?;
                             }
                             midly::MidiMessage::NoteOn { key, vel } => {
-                                transmit_message(key.into(), vel.into(), &mut device)?;
+                                device.transmit_message(key.into(), vel.into())?;
                             }
                             _ => (),
                         }
@@ -230,25 +140,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn transmit_message<W: Write>(
-    key: u8,
-    vel: u8,
-    device: &mut W,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let freq = key_to_frequency(key).to_be_bytes();
 
-    //println!("{}    {}", key, vel);
-
-    let message: [u8; 4] = [0x01, freq[0], freq[1], vel.into()];
-    let mut i = 1;
-    loop {
-        match device.write_all(&message) {
-            Ok(_) => return Ok(()),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
-                _ => return Err(e.into()),
-            },
-        }
-        i += 1;
-    }
-}
