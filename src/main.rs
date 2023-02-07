@@ -1,7 +1,5 @@
 use std::{
-    io::{Read, Stdin, Stdout, Write},
     path::PathBuf,
-    str::FromStr,
     time::Duration,
 };
 
@@ -56,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     };
 
-    let mut file_buf = std::fs::read(&file_path)?;
+    let file_buf = std::fs::read(&file_path)?;
 
     let midi = Smf::parse(&file_buf)?;
 
@@ -113,8 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                midly::TrackEventKind::Meta(m) => {
-                    if let midly::MetaMessage::Tempo(t) = m {
+                midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(t)) => {
                         // t microseconds per beat
 
                         tick = std::time::Duration::from_micros(
@@ -123,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         println!("tick is now {} µs", tick.as_micros());
                     }
-                }
+                
                 _ => (),
             }
         }

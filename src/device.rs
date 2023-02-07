@@ -44,7 +44,7 @@ impl Device {
     pub fn transmit_message(&mut self, key: u8, vel: u8) -> Result<(), Box<dyn std::error::Error>> {
         let freq = util::key_to_frequency(key).to_be_bytes();
 
-        let message: [u8; 4] = [0x01, freq[0], freq[1], vel.into()];
+        let message: [u8; 4] = [0x01, freq[0], freq[1], vel];
         let mut i = 1;
         loop {
             match self.0.write_all(&message) {
