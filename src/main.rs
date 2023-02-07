@@ -1,13 +1,13 @@
 use std::{
     io::{Read, Stdin, Stdout, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     time::Duration,
 };
 
 use clap::Parser;
 
-use midly::{Smf, Track};
+use midly::Smf;
 
 /* message format sent to device
 big endian transmission format
@@ -21,30 +21,6 @@ tone update message layout
 x: u16 tone
 y: u16 velocity
  */
-
-fn read_integer<T: std::str::FromStr, F: Fn(&T) -> bool>(
-    stdin: &Stdin,
-    stdout: &mut Stdout,
-    prompt: &str,
-    accept: F,
-) -> Result<T, Box<dyn std::error::Error>> {
-    let mut s = String::new();
-    loop {
-        stdout.write_all(prompt.as_bytes())?;
-        stdout.flush()?;
-
-        stdin.read_line(&mut s)?;
-
-        let b = s.trim();
-
-        if let Ok(x) = b.parse::<T>() {
-            if accept(&x) {
-                break Ok(x);
-            }
-        }
-        s.clear();
-    }
-}
 
 fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: Fn(&T) -> bool>(
     stdin: &Stdin,
@@ -63,40 +39,6 @@ fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: 
         if let Ok(x) = parse(s.trim()) {
             if accept(&x) {
                 break Ok(x);
-            }
-        }
-        s.clear();
-    }
-}
-
-fn read_input_multiple<
-    T,
-    ParseError,
-    Parser: Fn(&str) -> Result<T, ParseError>,
-    Filter: Fn(&T) -> bool,
->(
-    stdin: &Stdin,
-    stdout: &mut Stdout,
-    prompt: &str,
-    parse: Parser,
-    allow: Filter,
-) -> Result<Vec<T>, Box<dyn std::error::Error>> {
-    let mut v = vec![];
-    let mut s = String::new();
-    loop {
-        stdout.write_all(prompt.as_bytes())?;
-        stdout.flush()?;
-        stdin.read_line(&mut s)?;
-
-        if s.trim().is_empty() {
-            return Ok(v);
-        }
-
-        if let Ok(x) = parse(s.trim()) {
-            if allow(&x) {
-                v.push(x);
-            } else {
-                println!("not allowed, ignoring");
             }
         }
         s.clear();
@@ -273,10 +215,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 midly::TrackEventKind::SysEx(_) => (),
                 midly::TrackEventKind::Escape(_) => (),
-                midly::TrackEventKind::Meta(m) => match m {
-                    midly::MetaMessage::Tempo(t) => {
-                        println!("changing tempo to {}", t);
-
+                midly::TrackEventKind::Meta(m) => {
+                    if let midly::MetaMessage::Tempo(t) = m {
                         // t microseconds per beat
 
                         tick = std::time::Duration::from_micros(
@@ -285,8 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         println!("tick is now {} microseconds", tick.as_micros());
                     }
-                    _ => (),
-                },
+                }
             }
         }
     }
