@@ -179,14 +179,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                 let message: [u8; 4] = [0x01, freq[0], freq[1], 0x00];
 
+                                let mut i = 1;
+
                                 loop {
                                     match device.write_all(&message) {
                                         Ok(_) => break,
                                         Err(e) => match e.kind() {
-                                            std::io::ErrorKind::TimedOut => eprintln!("timed out"),
+                                            std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
                                             _ => Err(e)?,
                                         },
                                     }
+                                    i += 1;
                                 }
                             }
                             midly::MidiMessage::NoteOn { key, vel } => {
@@ -199,14 +202,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
 
                                 let message: [u8; 4] = [0x01, freq[0], freq[1], vel.into()];
+                                let mut i = 1;
                                 loop {
                                     match device.write_all(&message) {
                                         Ok(_) => break,
                                         Err(e) => match e.kind() {
-                                            std::io::ErrorKind::TimedOut => println!("timed out"),
+                                            std::io::ErrorKind::TimedOut => eprintln!("timed out {}", i),
                                             _ => Err(e)?,
                                         },
                                     }
+                                    i += 1;
                                 }
                             }
                             _ => (),
