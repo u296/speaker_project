@@ -13,9 +13,10 @@ follows:
 
 multibyte values are sent in big endian format
 
-the message begins with 0x01
-F is a 16 bit unsigned integer representing the frequency
-V is the velocity, if 0 then off, anything else then on
+the message begins with the byte 0x01
+	* F is a 16 bit unsigned integer representing the frequency
+	* V is an 8 bit unsigned integer containing the velocity, of
+the frequency. If 0 then off, anything else then on
  */
 
 /* SPEAKER
