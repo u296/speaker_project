@@ -1,3 +1,6 @@
+use clap::Parser;
+use device::{Device, DummyDevice, SerialDevice};
+use midly::{Smf, TrackEvent};
 use std::{
     path::PathBuf,
     sync::{
@@ -6,11 +9,6 @@ use std::{
     },
     time::Duration,
 };
-
-use clap::Parser;
-
-use device::Device;
-use midly::{Smf, TrackEvent};
 use tokio::sync::Mutex;
 
 mod device;
@@ -43,6 +41,9 @@ struct Args {
 
     #[arg(long, num_args = 1..)]
     tracks: Vec<usize>,
+
+    #[arg(short, long)]
+    dry: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -116,7 +117,7 @@ fn get_track_instrument<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (file_path, baud_rate, _allowed_channels, playlist_order) = {
+    let (file_path, baud_rate, _allowed_channels, playlist_order, dummy_device) = {
         let args = Args::parse();
 
         (
@@ -128,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 args.channels
             },
             args.tracks,
+            args.dry,
         )
     };
 
@@ -159,7 +161,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std::process::exit(0);
     }
 
-    let device = Arc::new(Mutex::new(device::Device::new(baud_rate)?));
+    let device: Arc<Mutex<dyn Device + Send + Sync>> = if dummy_device {
+        println!("using dummy device");
+        Arc::new(Mutex::new(DummyDevice))
+    } else {
+        Arc::new(Mutex::new(SerialDevice::new(baud_rate)?))
+    };
 
     let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
     let current_instruments = Arc::new(Mutex::new(0));
@@ -194,7 +201,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
     ticks_per_beat: u32,
     tick_microseconds: Arc<AtomicU32>,
-    device: Arc<Mutex<Device>>,
+    device: Arc<Mutex<dyn Device + Send + Sync>>,
     current_instruments: Arc<Mutex<u32>>,
     max_instruments: Arc<Mutex<u32>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -210,6 +217,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
             match e {
                 EventKind::NoteUpdate { key, vel } => {
                     let mut device_lock = device.lock().await;
+
                     device_lock.transmit_message_async(key, vel).await?;
 
                     if vel != 0 {

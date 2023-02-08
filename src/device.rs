@@ -1,12 +1,22 @@
 use std::{path::PathBuf, str::FromStr};
 
+use async_trait::async_trait;
 use tokio_serial::SerialStream;
 
 use crate::util;
 
-pub struct Device(SerialStream);
+#[async_trait]
+pub trait Device {
+    async fn transmit_message_async(
+        &mut self,
+        key: u8,
+        vel: u8,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
 
-impl Device {
+pub struct SerialDevice(SerialStream);
+
+impl SerialDevice {
     pub fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let ports = tokio_serial::available_ports()?;
 
@@ -43,8 +53,11 @@ impl Device {
             baud_rate,
         ))?))
     }
+}
 
-    pub async fn transmit_message_async(
+#[async_trait]
+impl Device for SerialDevice {
+    async fn transmit_message_async(
         &mut self,
         key: u8,
         vel: u8,
@@ -63,5 +76,18 @@ impl Device {
             }
             i += 1;
         }
+    }
+}
+
+pub struct DummyDevice;
+
+#[async_trait]
+impl Device for DummyDevice {
+    async fn transmit_message_async(
+        &mut self,
+        _: u8,
+        _: u8,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
     }
 }
