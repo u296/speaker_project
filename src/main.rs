@@ -151,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let name = get_track_name(track).unwrap_or("Unknown");
         let instrument = get_track_instrument(track).unwrap_or("Unknown");
 
-        println!("{i} - name: {name} - instrument: {instrument}");
+        println!("{i:<2} - name: {name:<40} - instrument: {instrument}");
     }
 
     if playlist_order.is_empty() {
