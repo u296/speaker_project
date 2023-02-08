@@ -1,6 +1,7 @@
 use clap::Parser;
 use device::{Device, DummyDevice, SerialDevice};
-use midly::{Smf, TrackEvent};
+use midi::{get_track_instrument, get_track_name};
+use midly::Smf;
 use std::{
     path::PathBuf,
     sync::{
@@ -46,75 +47,6 @@ struct Args {
     dry: bool,
 }
 
-#[derive(Debug, Clone)]
-struct Event {
-    delta: u32,
-    kind: Option<EventKind>,
-}
-
-#[derive(Debug, Clone)]
-enum EventKind {
-    NoteUpdate { key: u8, vel: u8 },
-    TempoUpdate(u32),
-    TrackName(String),
-    TrackInstrument(String),
-}
-
-fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<Event>>(track: I) -> B {
-    track
-        .into_iter()
-        .map(|track_event| Event {
-            delta: track_event.delta.into(),
-            kind: match track_event.kind {
-                midly::TrackEventKind::Midi {
-                    channel: _,
-                    message,
-                } => match message {
-                    midly::MidiMessage::NoteOff { key, vel: _ } => Some(EventKind::NoteUpdate {
-                        key: key.into(),
-                        vel: 0,
-                    }),
-                    midly::MidiMessage::NoteOn { key, vel } => Some(EventKind::NoteUpdate {
-                        key: key.into(),
-                        vel: vel.into(),
-                    }),
-                    _ => None,
-                },
-                midly::TrackEventKind::Meta(m) => match m {
-                    midly::MetaMessage::Tempo(t) => Some(EventKind::TempoUpdate(t.into())),
-                    midly::MetaMessage::TrackName(bytes) => Some(EventKind::TrackName(
-                        String::from_utf8_lossy(bytes).to_string(),
-                    )),
-                    midly::MetaMessage::InstrumentName(bytes) => Some(EventKind::TrackInstrument(
-                        String::from_utf8_lossy(bytes).to_string(),
-                    )),
-                    _ => None,
-                },
-                _ => None,
-            },
-        })
-        .collect()
-}
-
-fn get_track_name<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&'a str> {
-    for event in i {
-        if let Some(EventKind::TrackName(name)) = &event.kind {
-            return Some(name);
-        }
-    }
-
-    None
-}
-fn get_track_instrument<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&'a str> {
-    for event in i {
-        if let Some(EventKind::TrackInstrument(name)) = &event.kind {
-            return Some(name);
-        }
-    }
-
-    None
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (file_path, baud_rate, _allowed_channels, playlist_order, dummy_device) = {
@@ -146,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let tracks = midi_file
         .tracks
         .iter()
-        .map(convert)
+        .map(midi::convert)
         .collect::<Vec<Vec<_>>>();
 
     for (i, track) in tracks.iter().enumerate() {
@@ -197,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 static MICROSECOND: Duration = Duration::from_micros(1);
 
-async fn play_track<I: IntoIterator<Item = Event>>(
+async fn play_track<I: IntoIterator<Item = midi::Event>>(
     track: I,
     ticks_per_beat: u32,
     tick_microseconds: Arc<AtomicU32>,
@@ -215,7 +147,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
         let cycle_begin = tokio::time::Instant::now();
         if let Some(e) = track_event.kind {
             match e {
-                EventKind::NoteUpdate { key, vel } => {
+                midi::EventKind::NoteUpdate { key, vel } => {
                     let mut device_lock = device.lock().await;
 
                     device_lock.transmit_message_async(key, vel).await?;
@@ -234,7 +166,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                         *current_instruments.lock().await -= 1;
                     }
                 }
-                EventKind::TempoUpdate(t) => {
+                midi::EventKind::TempoUpdate(t) => {
                     let us_per_beat = t;
                     let us_per_tick = us_per_beat / ticks_per_beat;
 
