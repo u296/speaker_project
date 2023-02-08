@@ -162,8 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let device = Arc::new(Mutex::new(device::Device::new(baud_rate)?));
 
     let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
-    let current_instruments = Arc::new(AtomicU32::from(0));
-    let max_instruments = Arc::new(AtomicU32::from(0));
+    let current_instruments = Arc::new(Mutex::new(0));
+    let max_instruments = Arc::new(Mutex::new(0));
 
     let f = futures::future::join_all(playlist_order.iter().map(|i| tracks[*i].clone()).map(
         |track| {
@@ -195,8 +195,8 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     ticks_per_beat: u32,
     tick_microseconds: Arc<AtomicU32>,
     device: Arc<Mutex<Device>>,
-    current_instruments: Arc<AtomicU32>,
-    max_instruments: Arc<AtomicU32>,
+    current_instruments: Arc<Mutex<u32>>,
+    max_instruments: Arc<Mutex<u32>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut last_cycle_duration = Duration::from_secs(0);
     for track_event in track {
@@ -213,21 +213,17 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     device_lock.transmit_message_async(key, vel).await?;
 
                     if vel != 0 {
-                        current_instruments.fetch_add(1, Ordering::SeqCst);
-                        if current_instruments.load(Ordering::SeqCst)
-                            > max_instruments.load(Ordering::SeqCst)
-                        {
-                            max_instruments.store(
-                                current_instruments.load(Ordering::SeqCst),
-                                Ordering::SeqCst,
-                            );
-                            println!(
-                                "new maximum notes: {}",
-                                max_instruments.load(Ordering::SeqCst)
-                            );
+                        let mut current_instruments_lock = current_instruments.lock().await;
+                        let mut max_instruments_lock = max_instruments.lock().await;
+
+                        *current_instruments_lock += 1;
+
+                        if *current_instruments_lock > *max_instruments_lock {
+                            *max_instruments_lock = *current_instruments_lock;
+                            println!("new maximum notes: {}", *max_instruments_lock);
                         }
                     } else {
-                        current_instruments.fetch_sub(1, Ordering::SeqCst);
+                        *current_instruments.lock().await -= 1;
                     }
                 }
                 EventKind::TempoUpdate(t) => {
