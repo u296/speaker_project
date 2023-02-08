@@ -9,7 +9,7 @@ use crate::util;
 pub trait Device {
     async fn transmit_message_async(
         &mut self,
-        key: u8,
+        frequency: u16,
         vel: u8,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
@@ -59,10 +59,10 @@ impl SerialDevice {
 impl Device for SerialDevice {
     async fn transmit_message_async(
         &mut self,
-        key: u8,
+        freq: u16,
         vel: u8,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let freq = util::key_to_frequency(key).to_be_bytes();
+        let freq = freq.to_be_bytes();
 
         let message: [u8; 4] = [0x01, freq[0], freq[1], vel];
         let mut i = 1;
@@ -85,7 +85,7 @@ pub struct DummyDevice;
 impl Device for DummyDevice {
     async fn transmit_message_async(
         &mut self,
-        _: u8,
+        _: u16,
         _: u8,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())

@@ -1,9 +1,9 @@
 use std::io::Write;
 
 // 72 = C5
-pub fn key_to_frequency(key: u8) -> u16 {
+pub fn key_to_frequency(key: u8) -> f64 {
     let note = key as usize % 12;
-    let octave = key as u32 / 12;
+    let octave = key as i32 / 12;
 
     /* notes modulus
     0 C
@@ -21,10 +21,11 @@ pub fn key_to_frequency(key: u8) -> u16 {
      */
 
     let octave_8_freqs = [
-        4186, 4434, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902,
+        4186.0, 4434.0, 4699.0, 4978.0, 5274.0, 5588.0, 5920.0, 6272.0, 6645.0, 7040.0, 7459.0,
+        7902.0,
     ];
 
-    octave_8_freqs[note] / 2u16.pow(8 - octave)
+    octave_8_freqs[note] / 2.0f64.powi(8 - octave)
 }
 
 pub fn read_input<

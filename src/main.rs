@@ -45,11 +45,14 @@ struct Args {
 
     #[arg(short, long)]
     dry: bool,
+
+    #[arg(long, allow_negative_numbers = true, default_value_t = 0)]
+    pitch_shift: i8,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (file_path, baud_rate, _allowed_channels, playlist_order, dummy_device) = {
+    let (file_path, baud_rate, _allowed_channels, playlist_order, dummy_device, pitch_shift) = {
         let args = Args::parse();
 
         (
@@ -62,6 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             },
             args.tracks,
             args.dry,
+            args.pitch_shift,
         )
     };
 
@@ -100,6 +104,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Arc::new(Mutex::new(SerialDevice::new(baud_rate)?))
     };
 
+    let freq_multiplier = 2.0f64.powf(pitch_shift as f64 / 12.0);
+    let speed_multiplier = freq_multiplier;
+
     let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
     let current_instruments = Arc::new(Mutex::new(0));
     let max_instruments = Arc::new(Mutex::new(0));
@@ -113,6 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 device.clone(),
                 current_instruments.clone(),
                 max_instruments.clone(),
+                freq_multiplier,
+                speed_multiplier,
             ))
         },
     ));
@@ -136,11 +145,14 @@ async fn play_track<I: IntoIterator<Item = midi::Event>>(
     device: Arc<Mutex<dyn Device + Send + Sync>>,
     current_instruments: Arc<Mutex<u32>>,
     max_instruments: Arc<Mutex<u32>>,
+    freq_multiplier: f64,
+    speed_multiplier: f64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut last_cycle_duration = Duration::from_secs(0);
     for track_event in track {
         tokio::time::sleep(
             (tick_microseconds.load(Ordering::SeqCst) * MICROSECOND * track_event.delta)
+                .div_f64(speed_multiplier)
                 .saturating_sub(last_cycle_duration),
         )
         .await;
@@ -150,7 +162,12 @@ async fn play_track<I: IntoIterator<Item = midi::Event>>(
                 midi::EventKind::NoteUpdate { key, vel } => {
                     let mut device_lock = device.lock().await;
 
-                    device_lock.transmit_message_async(key, vel).await?;
+                    device_lock
+                        .transmit_message_async(
+                            (util::key_to_frequency(key) * freq_multiplier) as u16,
+                            vel,
+                        )
+                        .await?;
 
                     if vel != 0 {
                         let mut current_instruments_lock = current_instruments.lock().await;
