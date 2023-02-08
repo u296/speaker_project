@@ -161,25 +161,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let device = Arc::new(Mutex::new(device::Device::new(baud_rate)?));
 
-    let playlist = playlist_order
-        .iter()
-        .map(|i| tracks[*i].clone())
-        .collect::<Vec<_>>();
-
     let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
     let current_instruments = Arc::new(AtomicU32::from(0));
     let max_instruments = Arc::new(AtomicU32::from(0));
 
-    let f = futures::future::join_all(playlist.into_iter().map(|track| {
-        tokio::task::spawn(play_track(
-            track,
-            ticks_per_beat,
-            tick_microseconds.clone(),
-            device.clone(),
-            current_instruments.clone(),
-            max_instruments.clone(),
-        ))
-    }));
+    let f = futures::future::join_all(playlist_order.iter().map(|i| tracks[*i].clone()).map(
+        |track| {
+            tokio::task::spawn(play_track(
+                track,
+                ticks_per_beat,
+                tick_microseconds.clone(),
+                device.clone(),
+                current_instruments.clone(),
+                max_instruments.clone(),
+            ))
+        },
+    ));
 
     for i in f.await {
         match i? {
