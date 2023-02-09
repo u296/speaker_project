@@ -2,16 +2,9 @@ use clap::Parser;
 use device::{Device, DummyDevice, SerialDevice};
 use midi::{get_track_instrument, get_track_name, Event};
 use midly::Smf;
-use std::{
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
-    sync::{Barrier, Mutex},
+    sync::{broadcast, Barrier, Mutex},
     time::Instant,
 };
 
@@ -72,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
     };
 
-    let file_buf = std::fs::read(&file_path)?;
+    let file_buf = tokio::fs::read(&file_path).await?;
 
     let midi_file = Smf::parse(&file_buf)?;
 
@@ -139,26 +132,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let freq_multiplier = 2.0f64.powf(pitch_shift as f64 / 12.0);
     let speed_multiplier = freq_multiplier;
 
-    let tick_microseconds = Arc::new(AtomicU32::from(tick.as_micros() as u32));
     let current_instruments = Arc::new(Mutex::new(0));
     let max_instruments = Arc::new(Mutex::new(0));
 
-    //TODO fix tracks playing before correct tempo is set
-
     let barrier = Arc::new(Barrier::new(playlist_order.len()));
+    let (sender, _) = broadcast::channel(8);
 
     let f = futures::future::join_all(playlist_order.iter().map(|i| tracks[*i].clone()).map(
         |track| {
             tokio::task::spawn(play_track(
                 track,
                 ticks_per_beat,
-                tick_microseconds.clone(),
+                tick.as_micros() as u32,
                 device.clone(),
                 current_instruments.clone(),
                 max_instruments.clone(),
                 freq_multiplier,
                 speed_multiplier,
                 barrier.clone(),
+                sender.clone(),
             ))
         },
     ));
@@ -178,22 +170,53 @@ static MICROSECOND: Duration = Duration::from_micros(1);
 async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
     ticks_per_beat: u32,
-    tick_microseconds: Arc<AtomicU32>,
+    mut tick: u32,
     device: Arc<Mutex<dyn Device + Send + Sync>>,
     current_instruments: Arc<Mutex<u32>>,
     max_instruments: Arc<Mutex<u32>>,
     freq_multiplier: f64,
     speed_multiplier: f64,
     start_barrier: Arc<Barrier>,
+    bus_transmitter: broadcast::Sender<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     start_barrier.wait().await;
+
+    let mut listener = bus_transmitter.subscribe();
 
     let mut next_time = Instant::now();
 
     for track_event in track {
-        next_time += (track_event.delta * tick_microseconds.load(Ordering::SeqCst) * MICROSECOND)
-            .div_f64(speed_multiplier);
-        tokio::time::sleep_until(next_time).await;
+        next_time += (track_event.delta * tick * MICROSECOND).div_f64(speed_multiplier);
+
+        let start_wait = Instant::now();
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep_until(next_time) => {
+                    break;
+                },
+                Ok(new_tick) = listener.recv() => {
+                    let now = Instant::now();
+                    let elapsed_old_ticks = (now - start_wait).as_micros() as f64 / tick as f64;
+
+                    println!("interrupted: old tick = {tick} new tick = {new_tick}, elapsed old ticks: {elapsed_old_ticks}");
+
+                    let elapsed_old_ticks = elapsed_old_ticks.round() as u32;
+                    let remaining_new_ticks = track_event.delta - elapsed_old_ticks;
+
+                    let next_time_delta = remaining_new_ticks as i32 * (tick as i32 - new_tick as i32);
+
+                    println!("remaining ticks = {remaining_new_ticks} - shifting next by {} µs", next_time_delta);
+
+                    if new_tick > tick {
+                        next_time += Duration::from_micros(remaining_new_ticks as u64 * (new_tick - tick) as u64)
+                    } else {
+                        next_time -= Duration::from_micros(remaining_new_ticks as u64 * (tick - new_tick) as u64)
+                    }
+
+                    tick = new_tick;
+                }
+            }
+        }
 
         if let Some(e) = track_event.kind {
             match e {
@@ -234,7 +257,11 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     let us_per_beat = t;
                     let us_per_tick = us_per_beat / ticks_per_beat;
 
-                    tick_microseconds.store(us_per_tick, Ordering::SeqCst);
+                    tick = us_per_tick;
+                    drop(listener);
+                    bus_transmitter.send(us_per_tick)?;
+                    listener = bus_transmitter.subscribe();
+
                     println!("tick is now {us_per_tick} µs");
                 }
                 _ => (),
