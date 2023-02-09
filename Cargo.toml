@@ -7,17 +7,15 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = [
-    "io-util",
     "rt-multi-thread",
     "io-util",
     "time",
     "macros",
     "fs",
-    "io-std",
     "sync",
 ] }
 tokio-serial = "5"
 midly = "0.5"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
-async-trait = "*"
+async-trait = "0.1"
