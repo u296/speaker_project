@@ -1,6 +1,6 @@
 use clap::Parser;
 use device::{Device, DummyDevice, SerialDevice};
-use midi::{get_track_instrument, get_track_name};
+use midi::{get_track_instrument, get_track_name, Event};
 use midly::Smf;
 use std::{
     path::PathBuf,
@@ -10,7 +10,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Barrier, Mutex};
 
 mod device;
 mod midi;
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "file contains {} track(s), listing...",
         midi_file.tracks.len()
     );
-    let tracks = midi_file
+    let mut tracks = midi_file
         .tracks
         .iter()
         .map(midi::convert)
@@ -97,6 +97,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std::process::exit(0);
     }
 
+    let mut tempo_track_index = None;
+
+    'out: for (track_index, track) in tracks.iter().enumerate() {
+        for event in track.iter() {
+            if let Some(midi::EventKind::TempoUpdate(_)) = event.kind {
+                println!("determined that track {track_index} is the tempo track");
+                tempo_track_index = Some(track_index);
+                break 'out;
+            }
+        }
+    }
+
+    if let Some(tempo_track_index) = tempo_track_index {
+        for (track_index, track) in tracks.iter_mut().enumerate() {
+            if track_index != tempo_track_index {
+                track.insert(
+                    0,
+                    Event {
+                        delta: 100,
+                        kind: None,
+                    },
+                );
+            }
+        }
+    } else {
+        println!("unable to determine tempo track");
+        std::process::exit(1);
+    }
+
     let device: Arc<Mutex<dyn Device + Send + Sync>> = if dummy_device {
         println!("using dummy device");
         Arc::new(Mutex::new(DummyDevice))
@@ -111,6 +140,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let current_instruments = Arc::new(Mutex::new(0));
     let max_instruments = Arc::new(Mutex::new(0));
 
+    //TODO fix tracks playing before correct tempo is set
+
+    let barrier = Arc::new(Barrier::new(playlist_order.len()));
+
     let f = futures::future::join_all(playlist_order.iter().map(|i| tracks[*i].clone()).map(
         |track| {
             tokio::task::spawn(play_track(
@@ -122,6 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 max_instruments.clone(),
                 freq_multiplier,
                 speed_multiplier,
+                barrier.clone(),
             ))
         },
     ));
@@ -138,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 static MICROSECOND: Duration = Duration::from_micros(1);
 
-async fn play_track<I: IntoIterator<Item = midi::Event>>(
+async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
     ticks_per_beat: u32,
     tick_microseconds: Arc<AtomicU32>,
@@ -147,9 +181,14 @@ async fn play_track<I: IntoIterator<Item = midi::Event>>(
     max_instruments: Arc<Mutex<u32>>,
     freq_multiplier: f64,
     speed_multiplier: f64,
+    start_barrier: Arc<Barrier>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    start_barrier.wait().await;
     let mut last_cycle_duration = Duration::from_secs(0);
     for track_event in track {
+        /*for i in 0..track_event.delta {
+            tokio::time::sleep(tick_microseconds.load(Ordering::SeqCst) * MICROSECOND).await;
+        }*/
         tokio::time::sleep(
             (tick_microseconds.load(Ordering::SeqCst) * MICROSECOND * track_event.delta)
                 .div_f64(speed_multiplier)
