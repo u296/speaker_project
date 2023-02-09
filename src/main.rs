@@ -10,7 +10,10 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::{Barrier, Mutex};
+use tokio::{
+    sync::{Barrier, Mutex},
+    time::Instant,
+};
 
 mod device;
 mod midi;
@@ -184,18 +187,14 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     start_barrier: Arc<Barrier>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     start_barrier.wait().await;
-    let mut last_cycle_duration = Duration::from_secs(0);
+
+    let mut next_time = Instant::now();
+
     for track_event in track {
-        /*for i in 0..track_event.delta {
-            tokio::time::sleep(tick_microseconds.load(Ordering::SeqCst) * MICROSECOND).await;
-        }*/
-        tokio::time::sleep(
-            (tick_microseconds.load(Ordering::SeqCst) * MICROSECOND * track_event.delta)
-                .div_f64(speed_multiplier)
-                .saturating_sub(last_cycle_duration),
-        )
-        .await;
-        let cycle_begin = tokio::time::Instant::now();
+        next_time += (track_event.delta * tick_microseconds.load(Ordering::SeqCst) * MICROSECOND)
+            .div_f64(speed_multiplier);
+        tokio::time::sleep_until(next_time).await;
+
         if let Some(e) = track_event.kind {
             match e {
                 midi::EventKind::NoteUpdate { key, vel } => {
@@ -207,6 +206,15 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                             vel,
                         )
                         .await?;
+
+                    /*
+                    I'm unsure exactly why this is needed, but without
+                    it the timing of the notes goes apeshit. I suspect
+                    it has to do with tokio::sleep_until only having
+                    millisecond granularity, and this operation finishing
+                    too fast will mess things up
+                     */
+                    tokio::time::sleep(Duration::from_millis(1)).await;
 
                     if vel != 0 {
                         let mut current_instruments_lock = current_instruments.lock().await;
@@ -232,8 +240,6 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                 _ => (),
             }
         }
-        let cycle_end = tokio::time::Instant::now();
-        last_cycle_duration = cycle_end - cycle_begin;
     }
     Ok(())
 }
