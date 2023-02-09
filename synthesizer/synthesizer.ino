@@ -36,7 +36,7 @@ struct Speaker
 	int frequency = 0;
 };
 
-#define NUM_SPEAKERS 2
+#define NUM_SPEAKERS 6
 Speaker speakers[NUM_SPEAKERS];
 
 void setup()
@@ -53,6 +53,29 @@ void setup()
 	speakers[1].pin_name = PA_6;
 	speakers[1].channel = 1;
 	speakers[1].timer = new HardwareTimer(TIM3);
+
+	// PA 1 TIM2 chan 2
+
+	speakers[2].pin_name = PA_1;
+	speakers[2].channel = 2;
+	speakers[2].timer = new HardwareTimer(TIM2);
+
+	// PA 3 TIM 9 chan 2 alt 2
+
+	speakers[3].pin_name = PA_3_ALT2;
+	speakers[3].channel = 2;
+	speakers[3].timer = new HardwareTimer(TIM9);
+
+	// PA 8 TIM 1 chan 1
+	speakers[4].pin_name = PA_8;
+	speakers[4].channel = 1;
+	speakers[4].timer = new HardwareTimer(TIM1);
+
+	// PB 6 TIM 4 chan 1
+
+	speakers[5].pin_name = PB_6;
+	speakers[5].channel = 1;
+	speakers[5].timer = new HardwareTimer(TIM4);
 
 	// introduce all the speakers by playing a separate note  on each
 	for (int i = 0; i < NUM_SPEAKERS; i++)
