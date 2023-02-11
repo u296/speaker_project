@@ -40,9 +40,6 @@ struct Args {
     baudrate: u32,
 
     #[arg(long, num_args = 1..)]
-    channels: Vec<u8>,
-
-    #[arg(long, num_args = 1..)]
     tracks: Vec<usize>,
 
     #[arg(short, long)]
@@ -64,15 +61,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (
-        file_path,
-        baud_rate,
-        _allowed_channels,
-        playlist_order,
-        dummy_device,
-        pitch_multiplier,
-        tempo_multiplier,
-    ) = {
+    let (file_path, baud_rate, playlist_order, dummy_device, pitch_multiplier, tempo_multiplier) = {
         let args = Args::parse();
 
         let (pitch_multiplier, tempo_multiplier) = if let Some(speed_shift) = args.speed_shift {
@@ -95,11 +84,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         (
             args.file,
             args.baudrate,
-            if args.channels.is_empty() {
-                (0..=255).into_iter().collect()
-            } else {
-                args.channels
-            },
             args.tracks,
             args.dry,
             pitch_multiplier,
