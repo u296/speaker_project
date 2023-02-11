@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use device::{Device, DummyDevice, SerialDevice};
 use midi::{get_track_instrument, get_track_name, Event};
 use midly::Smf;
@@ -28,6 +28,12 @@ y: u16 velocity
 // c5 = 72
 
 #[derive(Parser)]
+#[command(group(
+    ArgGroup::new("speed_components")
+        .required(false)
+        .multiple(true)
+        .args(["pitch_shift", "tempo_shift"])
+))]
 struct Args {
     file: PathBuf,
     #[arg(short, long, default_value_t = 250000)]
@@ -42,14 +48,49 @@ struct Args {
     #[arg(short, long)]
     dry: bool,
 
-    #[arg(long, allow_negative_numbers = true, default_value_t = 0)]
-    pitch_shift: i8,
+    #[arg(
+        long,
+        allow_negative_numbers = true,
+        conflicts_with("speed_components")
+    )]
+    speed_shift: Option<i8>,
+
+    #[arg(long, allow_negative_numbers = true)]
+    pitch_shift: Option<i8>,
+
+    #[arg(long, allow_negative_numbers = true)]
+    tempo_shift: Option<i8>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (file_path, baud_rate, _allowed_channels, playlist_order, dummy_device, pitch_shift) = {
+    let (
+        file_path,
+        baud_rate,
+        _allowed_channels,
+        playlist_order,
+        dummy_device,
+        pitch_multiplier,
+        tempo_multiplier,
+    ) = {
         let args = Args::parse();
+
+        let (pitch_multiplier, tempo_multiplier) = if let Some(speed_shift) = args.speed_shift {
+            (
+                2.0f64.powf(speed_shift as f64 / 12.0),
+                2.0f64.powf(speed_shift as f64 / 12.0),
+            )
+        } else {
+            (
+                2.0f64.powf(args.pitch_shift.unwrap_or(0) as f64 / 12.0),
+                2.0f64.powf(args.tempo_shift.unwrap_or(0) as f64 / 12.0),
+            )
+        };
+
+        if args.speed_shift.is_some() || args.pitch_shift.is_some() || args.tempo_shift.is_some() {
+            println!("pitch multiplier: {}", pitch_multiplier);
+            println!("tempo multiplier: {}", tempo_multiplier);
+        }
 
         (
             args.file,
@@ -61,7 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             },
             args.tracks,
             args.dry,
-            args.pitch_shift,
+            pitch_multiplier,
+            tempo_multiplier,
         )
     };
 
@@ -129,9 +171,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Arc::new(Mutex::new(SerialDevice::new(baud_rate)?))
     };
 
-    let freq_multiplier = 2.0f64.powf(pitch_shift as f64 / 12.0);
-    let speed_multiplier = freq_multiplier;
-
     let current_instruments = Arc::new(Mutex::new(0));
     let max_instruments = Arc::new(Mutex::new(0));
 
@@ -147,8 +186,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 device.clone(),
                 current_instruments.clone(),
                 max_instruments.clone(),
-                freq_multiplier,
-                speed_multiplier,
+                pitch_multiplier,
+                tempo_multiplier,
                 barrier.clone(),
                 sender.clone(),
             ))
@@ -174,8 +213,8 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     device: Arc<Mutex<dyn Device + Send + Sync>>,
     current_instruments: Arc<Mutex<u32>>,
     max_instruments: Arc<Mutex<u32>>,
-    freq_multiplier: f64,
-    speed_multiplier: f64,
+    pitch_multiplier: f64,
+    tempo_multiplier: f64,
     start_barrier: Arc<Barrier>,
     tick_update_tx: broadcast::Sender<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -219,7 +258,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
 
                     device_lock
                         .transmit_message_async(
-                            (util::key_to_frequency(key) * freq_multiplier) as u16,
+                            (util::key_to_frequency(key) * pitch_multiplier) as u16,
                             vel,
                         )
                         .await?;
@@ -248,16 +287,19 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                 }
                 midi::EventKind::TempoUpdate(t) => {
                     let us_per_beat = t;
-                    let us_per_tick =
-                        (us_per_beat as f64 / (ticks_per_beat as f64 * speed_multiplier)) as u32;
+                    let us_per_tick = (us_per_beat as f64 / (ticks_per_beat as f64)) as u32;
 
-                    tick = us_per_tick;
+                    let us_per_tick_tempo_adjusted =
+                        (us_per_beat as f64 / (ticks_per_beat as f64 * tempo_multiplier)) as u32;
+
+                    tick = us_per_tick_tempo_adjusted;
                     drop(tick_update_rx);
-                    tick_update_tx.send(us_per_tick)?;
+                    tick_update_tx.send(us_per_tick_tempo_adjusted)?;
                     tick_update_rx = tick_update_tx.subscribe();
 
-                    println!("speed multiplier: {speed_multiplier}");
-                    println!("tick is now {us_per_tick} µs");
+                    println!(
+                        "tick is now {us_per_tick_tempo_adjusted} µs, adjusted from {us_per_tick} µs"
+                    );
                 }
                 _ => (),
             }
