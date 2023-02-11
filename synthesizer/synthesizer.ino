@@ -77,7 +77,7 @@ void setup()
 	speakers[5].channel = 1;
 	speakers[5].timer = new HardwareTimer(TIM4);
 
-	// introduce all the speakers by playing a separate note  on each
+	// introduce all the speakers by playing a separate note on each
 	for (int i = 0; i < NUM_SPEAKERS; i++)
 	{
 		speakers[i].timer->setPWM(speakers[i].channel, speakers[i].pin_name, 200 * pow(1.5, i), 50);
