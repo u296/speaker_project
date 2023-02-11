@@ -80,7 +80,7 @@ void setup()
 	// introduce all the speakers by playing a separate note  on each
 	for (int i = 0; i < NUM_SPEAKERS; i++)
 	{
-		speakers[i].timer->setPWM(speakers[i].channel, speakers[i].pin_name, 200 + 100 * i, 50);
+		speakers[i].timer->setPWM(speakers[i].channel, speakers[i].pin_name, 200 * pow(1.5, i), 50);
 		delay(250);
 		speakers[i].timer->pause();
 	}
