@@ -177,16 +177,16 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     freq_multiplier: f64,
     speed_multiplier: f64,
     start_barrier: Arc<Barrier>,
-    bus_transmitter: broadcast::Sender<u32>,
+    tick_update_tx: broadcast::Sender<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     start_barrier.wait().await;
 
-    let mut listener = bus_transmitter.subscribe();
+    let mut tick_update_rx = tick_update_tx.subscribe();
 
     let mut next_time = Instant::now();
 
     for track_event in track {
-        next_time += (track_event.delta * tick * MICROSECOND).div_f64(speed_multiplier);
+        next_time += track_event.delta * tick * MICROSECOND;
 
         let start_wait = Instant::now();
         loop {
@@ -194,18 +194,12 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                 _ = tokio::time::sleep_until(next_time) => {
                     break;
                 },
-                Ok(new_tick) = listener.recv() => {
+                Ok(new_tick) = tick_update_rx.recv() => {
                     let now = Instant::now();
                     let elapsed_old_ticks = (now - start_wait).as_micros() as f64 / tick as f64;
 
-                    println!("interrupted: old tick = {tick} new tick = {new_tick}, elapsed old ticks: {elapsed_old_ticks}");
-
                     let elapsed_old_ticks = elapsed_old_ticks.round() as u32;
                     let remaining_new_ticks = track_event.delta - elapsed_old_ticks;
-
-                    let next_time_delta = remaining_new_ticks as i32 * (tick as i32 - new_tick as i32);
-
-                    println!("remaining ticks = {remaining_new_ticks} - shifting next by {} µs", next_time_delta);
 
                     if new_tick > tick {
                         next_time += Duration::from_micros(remaining_new_ticks as u64 * (new_tick - tick) as u64)
@@ -234,10 +228,9 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     I'm unsure exactly why this is needed, but without
                     it the timing of the notes goes apeshit. I suspect
                     it has to do with tokio::sleep_until only having
-                    millisecond granularity, and this operation finishing
-                    too fast will mess things up
+                    millisecond granularity
                      */
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    tokio::time::sleep(Duration::from_nanos(1)).await;
 
                     if vel != 0 {
                         let mut current_instruments_lock = current_instruments.lock().await;
@@ -258,13 +251,12 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     let us_per_tick =
                         (us_per_beat as f64 / (ticks_per_beat as f64 * speed_multiplier)) as u32;
 
-                    println!("speed multiplier: {speed_multiplier}");
-
                     tick = us_per_tick;
-                    drop(listener);
-                    bus_transmitter.send(us_per_tick)?;
-                    listener = bus_transmitter.subscribe();
+                    drop(tick_update_rx);
+                    tick_update_tx.send(us_per_tick)?;
+                    tick_update_rx = tick_update_tx.subscribe();
 
+                    println!("speed multiplier: {speed_multiplier}");
                     println!("tick is now {us_per_tick} µs");
                 }
                 _ => (),
