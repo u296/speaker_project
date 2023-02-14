@@ -1,8 +1,14 @@
-use std::time::Duration;
+use std::{path::Path, process::exit, time::Duration};
 
-use midly::{Timing, TrackEvent};
+use midly::{MetaMessage, Smf, TrackEvent, TrackEventKind};
 
-pub fn deduce_timing(timing: &Timing) -> (u32, Duration) {
+#[derive(Debug, Clone, Copy)]
+pub struct Timing {
+    pub ticks_per_beat: u32,
+    pub tick: Duration,
+}
+
+pub fn deduce_timing(timing: &midly::Timing) -> Timing {
     match timing {
         midly::Timing::Metrical(a) => {
             println!("timing = metrical: {a}");
@@ -13,7 +19,10 @@ pub fn deduce_timing(timing: &Timing) -> (u32, Duration) {
             println!("ticks per beat: {ticks_per_beat}");
             println!("assuming initial tick: {} µs", tick.as_micros());
 
-            (ticks_per_beat, tick)
+            Timing {
+                ticks_per_beat,
+                tick,
+            }
         }
         midly::Timing::Timecode(fps, subframe) => {
             println!("timing = timecode: {}, {}", fps.as_int(), subframe);
@@ -24,7 +33,10 @@ pub fn deduce_timing(timing: &Timing) -> (u32, Duration) {
             println!("ticks per beat: {ticks_per_beat}");
             println!("initial tick: {} µs", tick.as_micros());
 
-            (ticks_per_beat, tick)
+            Timing {
+                ticks_per_beat,
+                tick,
+            }
         }
     }
 }
@@ -81,22 +93,70 @@ pub fn convert<'a, I: IntoIterator<Item = &'a TrackEvent<'a>>, B: FromIterator<E
         .collect()
 }
 
-pub fn get_track_name<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&'a str> {
-    for event in i {
-        if let Some(EventKind::TrackName(name)) = &event.kind {
-            return Some(name);
+fn get_track_name_raw<'a, I: Iterator<Item = &'a TrackEvent<'a>>>(track: I) -> Option<String> {
+    for i in track {
+        if let TrackEventKind::Meta(MetaMessage::TrackName(name_slice)) = i.kind {
+            return Some(String::from_utf8_lossy(name_slice).to_string());
         }
     }
-
     None
 }
 
-pub fn get_track_instrument<'a, I: IntoIterator<Item = &'a Event>>(i: I) -> Option<&'a str> {
-    for event in i {
-        if let Some(EventKind::TrackInstrument(name)) = &event.kind {
-            return Some(name);
+fn get_track_instrument_raw<'a, I: Iterator<Item = &'a TrackEvent<'a>>>(
+    track: I,
+) -> Option<String> {
+    for i in track {
+        if let TrackEventKind::Meta(MetaMessage::InstrumentName(name_slice)) = i.kind {
+            return Some(String::from_utf8_lossy(name_slice).to_string());
         }
     }
-
     None
+}
+
+pub struct MidiSequence {
+    pub timing: Timing,
+    pub tracks: Vec<Vec<Event>>,
+}
+
+impl MidiSequence {
+    pub async fn parse_file(
+        path: impl AsRef<Path>,
+        track_indices: impl IntoIterator<Item = usize>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let file_buf = tokio::fs::read(path).await?;
+
+        let raw_midi = Smf::parse(&file_buf)?;
+
+        let timing = deduce_timing(&raw_midi.header.timing);
+
+        println!(
+            "file contains {} track(s), listing...",
+            raw_midi.tracks.len()
+        );
+
+        for (i, raw_track) in raw_midi.tracks.iter().enumerate() {
+            let name = get_track_name_raw(raw_track.iter()).unwrap_or_else(|| "Unknown".into());
+            let instrument =
+                get_track_instrument_raw(raw_track.iter()).unwrap_or_else(|| "Unknown".into());
+
+            println!("{i:<2} - name: {name:<32} - instrument: {instrument}");
+        }
+
+        let play_tracks = track_indices
+            .into_iter()
+            .map(|n| convert::<_, Vec<_>>(raw_midi.tracks[n].iter()))
+            .collect::<Vec<_>>();
+
+        if play_tracks.is_empty() {
+            println!("no tracks specified. Quitting");
+            exit(0);
+        }
+
+        // no postprocessing, all tracks including tempo track will start at the same time
+
+        Ok(Self {
+            tracks: play_tracks,
+            timing,
+        })
+    }
 }

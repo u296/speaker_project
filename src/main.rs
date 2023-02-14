@@ -1,16 +1,15 @@
-use clap::{ArgGroup, Parser};
-use device::{Device, DummyDevice, SerialDevice};
-use midi::{get_track_instrument, get_track_name, Event};
-use midly::Smf;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use args::Speed;
+use device::Device;
+use midi::{Event, MidiSequence, Timing};
+use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::{broadcast, Barrier, Mutex},
     time::Instant,
 };
 
+mod args;
 mod device;
 mod midi;
-mod util;
 
 /* message format sent to device
 big endian transmission format
@@ -26,157 +25,63 @@ y: u16 velocity
  */
 
 // c5 = 72
+fn key_to_frequency(key: u8) -> f64 {
+    let note = key as usize % 12;
+    let octave = key as i32 / 12;
 
-#[derive(Parser)]
-#[command(group(
-    ArgGroup::new("speed_components")
-        .required(false)
-        .multiple(true)
-        .args(["pitch_shift", "tempo_shift"])
-))]
-struct Args {
-    file: PathBuf,
-    #[arg(short, long, default_value_t = 250000)]
-    baudrate: u32,
+    /* notes modulus
+    0 C
+    1 C#
+    2 D
+    3 D#
+    4 E
+    5 F
+    6 F#
+    7 G
+    8 G#
+    9 A
+    10 A#
+    11 B
+     */
 
-    #[arg(long, num_args = 1..)]
-    tracks: Vec<usize>,
+    let octave_8_freqs = [
+        4186.0, 4434.0, 4699.0, 4978.0, 5274.0, 5588.0, 5920.0, 6272.0, 6645.0, 7040.0, 7459.0,
+        7902.0,
+    ];
 
-    #[arg(short, long)]
-    dry: bool,
+    octave_8_freqs[note] / 2.0f64.powi(8 - octave)
+}
 
-    #[arg(
-        long,
-        allow_negative_numbers = true,
-        conflicts_with("speed_components")
-    )]
-    speed_shift: Option<i8>,
-
-    #[arg(long, allow_negative_numbers = true)]
-    pitch_shift: Option<i8>,
-
-    #[arg(long, allow_negative_numbers = true)]
-    tempo_shift: Option<i8>,
+struct InstrumentCount {
+    current: usize,
+    max: usize,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (file_path, baud_rate, playlist_order, dummy_device, pitch_multiplier, tempo_multiplier) = {
-        let args = Args::parse();
+    let args = args::Args::parse();
 
-        let (pitch_multiplier, tempo_multiplier) = if let Some(speed_shift) = args.speed_shift {
-            (
-                2.0f64.powf(speed_shift as f64 / 12.0),
-                2.0f64.powf(speed_shift as f64 / 12.0),
-            )
-        } else {
-            (
-                2.0f64.powf(args.pitch_shift.unwrap_or(0) as f64 / 12.0),
-                2.0f64.powf(args.tempo_shift.unwrap_or(0) as f64 / 12.0),
-            )
-        };
+    let midi_sequence =
+        MidiSequence::parse_file(&args.file_path, args.tracks.iter().copied()).await?;
 
-        if args.speed_shift.is_some() || args.pitch_shift.is_some() || args.tempo_shift.is_some() {
-            println!("pitch multiplier: {}", pitch_multiplier);
-            println!("tempo multiplier: {}", tempo_multiplier);
-        }
+    let device = device::new(args.baud_rate, args.dry_run)?;
 
-        (
-            args.file,
-            args.baudrate,
-            args.tracks,
-            args.dry,
-            pitch_multiplier,
-            tempo_multiplier,
-        )
-    };
+    let instrument_count = Arc::new(Mutex::new(InstrumentCount { current: 0, max: 0 }));
 
-    let file_buf = tokio::fs::read(&file_path).await?;
-
-    let midi_file = Smf::parse(&file_buf)?;
-
-    let (ticks_per_beat, tick): (u32, Duration) = midi::deduce_timing(&midi_file.header.timing);
-
-    println!(
-        "file contains {} track(s), listing...",
-        midi_file.tracks.len()
-    );
-    let mut tracks = midi_file
-        .tracks
-        .iter()
-        .map(midi::convert)
-        .collect::<Vec<Vec<_>>>();
-
-    for (i, track) in tracks.iter().enumerate() {
-        let name = get_track_name(track).unwrap_or("Unknown");
-        let instrument = get_track_instrument(track).unwrap_or("Unknown");
-
-        println!("{i:<2} - name: {name:<40} - instrument: {instrument}");
-    }
-
-    if playlist_order.is_empty() {
-        println!("no playlist was specified. Quitting");
-        std::process::exit(0);
-    }
-
-    let mut tempo_track_index = None;
-
-    'out: for (track_index, track) in tracks.iter().enumerate() {
-        for event in track.iter() {
-            if let Some(midi::EventKind::TempoUpdate(_)) = event.kind {
-                println!("determined that track {track_index} is the tempo track");
-                tempo_track_index = Some(track_index);
-                break 'out;
-            }
-        }
-    }
-
-    if let Some(tempo_track_index) = tempo_track_index {
-        for (track_index, track) in tracks.iter_mut().enumerate() {
-            if track_index != tempo_track_index {
-                track.insert(
-                    0,
-                    Event {
-                        delta: 100,
-                        kind: None,
-                    },
-                );
-            }
-        }
-    } else {
-        println!("unable to determine tempo track");
-        std::process::exit(1);
-    }
-
-    let device: Arc<Mutex<dyn Device + Send + Sync>> = if dummy_device {
-        println!("using dummy device");
-        Arc::new(Mutex::new(DummyDevice))
-    } else {
-        Arc::new(Mutex::new(SerialDevice::new(baud_rate)?))
-    };
-
-    let current_instruments = Arc::new(Mutex::new(0));
-    let max_instruments = Arc::new(Mutex::new(0));
-
-    let barrier = Arc::new(Barrier::new(playlist_order.len()));
+    let barrier = Arc::new(Barrier::new(args.tracks.len()));
     let (sender, _) = broadcast::channel(8);
 
-    let f = futures::future::join_all(playlist_order.iter().map(|i| tracks[*i].clone()).map(
-        |track| {
-            tokio::task::spawn(play_track(
-                track,
-                ticks_per_beat,
-                tick.as_micros() as u32,
-                device.clone(),
-                current_instruments.clone(),
-                max_instruments.clone(),
-                pitch_multiplier,
-                tempo_multiplier,
-                barrier.clone(),
-                sender.clone(),
-            ))
-        },
-    ));
+    let f = futures::future::join_all(midi_sequence.tracks.into_iter().map(|track| {
+        tokio::task::spawn(play_track(
+            track,
+            midi_sequence.timing,
+            device.clone(),
+            instrument_count.clone(),
+            args.speed,
+            barrier.clone(),
+            sender.clone(),
+        ))
+    }));
 
     for i in f.await {
         match i? {
@@ -192,17 +97,17 @@ static MICROSECOND: Duration = Duration::from_micros(1);
 
 async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
-    ticks_per_beat: u32,
-    mut tick: u32,
+    timing: Timing,
     device: Arc<Mutex<dyn Device + Send + Sync>>,
-    current_instruments: Arc<Mutex<u32>>,
-    max_instruments: Arc<Mutex<u32>>,
-    pitch_multiplier: f64,
-    tempo_multiplier: f64,
+    instrument_count: Arc<Mutex<InstrumentCount>>,
+    speed: Speed,
     start_barrier: Arc<Barrier>,
     tick_update_tx: broadcast::Sender<u32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     start_barrier.wait().await;
+
+    let ticks_per_beat = timing.ticks_per_beat;
+    let mut tick = timing.tick.as_micros() as u32;
 
     let mut tick_update_rx = tick_update_tx.subscribe();
 
@@ -241,10 +146,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     let mut device_lock = device.lock().await;
 
                     device_lock
-                        .transmit_message_async(
-                            (util::key_to_frequency(key) * pitch_multiplier) as u16,
-                            vel,
-                        )
+                        .transmit_message_async((key_to_frequency(key) * speed.pitch) as u16, vel)
                         .await?;
 
                     /*
@@ -255,18 +157,16 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                      */
                     tokio::time::sleep(Duration::from_nanos(1)).await;
 
+                    let mut instrument_count_lock = instrument_count.lock().await;
                     if vel != 0 {
-                        let mut current_instruments_lock = current_instruments.lock().await;
-                        let mut max_instruments_lock = max_instruments.lock().await;
+                        instrument_count_lock.current += 1;
 
-                        *current_instruments_lock += 1;
-
-                        if *current_instruments_lock > *max_instruments_lock {
-                            *max_instruments_lock = *current_instruments_lock;
-                            println!("new maximum notes: {}", *max_instruments_lock);
+                        if instrument_count_lock.current > instrument_count_lock.max {
+                            instrument_count_lock.max = instrument_count_lock.current;
+                            println!("new maximum notes: {}", instrument_count_lock.max);
                         }
                     } else {
-                        *current_instruments.lock().await -= 1;
+                        instrument_count_lock.current -= 1;
                     }
                 }
                 midi::EventKind::TempoUpdate(t) => {
@@ -274,7 +174,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     let us_per_tick = (us_per_beat as f64 / (ticks_per_beat as f64)) as u32;
 
                     let us_per_tick_tempo_adjusted =
-                        (us_per_beat as f64 / (ticks_per_beat as f64 * tempo_multiplier)) as u32;
+                        (us_per_beat as f64 / (ticks_per_beat as f64 * speed.tempo)) as u32;
 
                     tick = us_per_tick_tempo_adjusted;
                     drop(tick_update_rx);
