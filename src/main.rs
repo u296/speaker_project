@@ -126,6 +126,74 @@ async fn sleep_until(
     }
 }
 
+async fn handle_note_update(
+    device: Arc<Mutex<dyn Device + Send + Sync>>,
+    key: u8,
+    vel: u8,
+    instrument_count: Arc<Mutex<InstrumentCount>>,
+    pitch: f64,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut device_lock = device.lock().await;
+    device_lock
+        .transmit_message_async((key_to_frequency(key) * pitch) as u16, vel)
+        .await?;
+
+    drop(device_lock);
+
+    let mut instrument_count_lock = instrument_count.lock().await;
+    if vel != 0 {
+        instrument_count_lock.current += 1;
+
+        if instrument_count_lock.current > instrument_count_lock.max {
+            instrument_count_lock.max = instrument_count_lock.current;
+            println!("new maximum notes: {}", instrument_count_lock.max);
+        }
+    } else {
+        instrument_count_lock.current -= 1;
+    }
+    drop(instrument_count_lock);
+
+    /*
+    unsure why this is necessary, but removing it
+    makes the notes very inconsistent and some of
+    them don't turn off. I suspect it has to do with
+    tokio::time::sleep_until
+    */
+    tokio::time::sleep(Duration::from_nanos(1)).await;
+
+    Ok(())
+}
+
+async fn handle_tempo_update(
+    new_us_per_beat: u32,
+    ticks_per_beat: u32,
+    tick_us: &mut u32,
+    tempo: f64,
+    tick_update_tx: &broadcast::Sender<u32>,
+    tick_update_rx: &mut broadcast::Receiver<u32>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let us_per_tick = new_us_per_beat as f64 / (ticks_per_beat as f64);
+    let us_per_tick_tempo_adjusted = us_per_tick / tempo;
+
+    *tick_us = us_per_tick_tempo_adjusted.round() as u32;
+    tick_update_tx.send(us_per_tick_tempo_adjusted.round() as u32)?;
+    drop(std::mem::replace(
+        tick_update_rx,
+        tick_update_tx.subscribe(),
+    ));
+    /*
+    We don't want this thread to receive the update message,
+    so we drop the old receiver and create a new one.
+
+    On the other hand, not setting the tick here and letting
+    the message handle it might work and be easier
+    */
+
+    println!("tick is now {us_per_tick_tempo_adjusted} µs, adjusted from {us_per_tick} µs");
+
+    Ok(())
+}
+
 async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
     timing: Timing,
@@ -158,45 +226,25 @@ async fn play_track<I: IntoIterator<Item = Event>>(
         if let Some(e) = track_event.kind {
             match e {
                 midi::EventKind::NoteUpdate { key, vel } => {
-                    let mut device_lock = device.lock().await;
-
-                    device_lock
-                        .transmit_message_async((key_to_frequency(key) * speed.pitch) as u16, vel)
-                        .await?;
-
-                    /*
-                    I'm unsure exactly why this is needed, but without
-                    it the timing of the notes goes apeshit. I suspect
-                    it has to do with tokio::sleep_until
-                     */
-                    tokio::time::sleep(Duration::from_nanos(1)).await;
-
-                    let mut instrument_count_lock = instrument_count.lock().await;
-                    if vel != 0 {
-                        instrument_count_lock.current += 1;
-
-                        if instrument_count_lock.current > instrument_count_lock.max {
-                            instrument_count_lock.max = instrument_count_lock.current;
-                            println!("new maximum notes: {}", instrument_count_lock.max);
-                        }
-                    } else {
-                        instrument_count_lock.current -= 1;
-                    }
+                    handle_note_update(
+                        device.clone(),
+                        key,
+                        vel,
+                        instrument_count.clone(),
+                        speed.pitch,
+                    )
+                    .await?;
                 }
-                midi::EventKind::TempoUpdate(t) => {
-                    let us_per_beat = t;
-
-                    let us_per_tick = us_per_beat as f64 / (ticks_per_beat as f64);
-                    let us_per_tick_tempo_adjusted = us_per_tick / speed.tempo;
-
-                    tick_us = us_per_tick_tempo_adjusted.round() as u32;
-                    drop(tick_update_rx);
-                    tick_update_tx.send(us_per_tick_tempo_adjusted.round() as u32)?;
-                    tick_update_rx = tick_update_tx.subscribe();
-
-                    println!(
-                        "tick is now {us_per_tick_tempo_adjusted} µs, adjusted from {us_per_tick} µs"
-                    );
+                midi::EventKind::TempoUpdate(new_us_per_beat) => {
+                    handle_tempo_update(
+                        new_us_per_beat,
+                        ticks_per_beat,
+                        &mut tick_us,
+                        speed.tempo,
+                        &tick_update_tx,
+                        &mut tick_update_rx,
+                    )
+                    .await?
                 }
                 _ => (),
             }
