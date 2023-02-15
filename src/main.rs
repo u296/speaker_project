@@ -185,14 +185,13 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                 }
                 midi::EventKind::TempoUpdate(t) => {
                     let us_per_beat = t;
-                    let us_per_tick = (us_per_beat as f64 / (ticks_per_beat as f64)) as u32;
 
-                    let us_per_tick_tempo_adjusted =
-                        (us_per_beat as f64 / (ticks_per_beat as f64 * speed.tempo)) as u32;
+                    let us_per_tick = us_per_beat as f64 / (ticks_per_beat as f64);
+                    let us_per_tick_tempo_adjusted = us_per_tick / speed.tempo;
 
-                    tick_us = us_per_tick_tempo_adjusted;
+                    tick_us = us_per_tick_tempo_adjusted.round() as u32;
                     drop(tick_update_rx);
-                    tick_update_tx.send(us_per_tick_tempo_adjusted)?;
+                    tick_update_tx.send(us_per_tick_tempo_adjusted.round() as u32)?;
                     tick_update_rx = tick_update_tx.subscribe();
 
                     println!(
