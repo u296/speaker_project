@@ -93,7 +93,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-static MICROSECOND: Duration = Duration::from_micros(1);
+async fn sleep_until(
+    wakeup_time: &mut Instant,
+    mut remaining_ticks: u32,
+    tick_us: &mut u32,
+    tick_update_rx: &mut broadcast::Receiver<u32>,
+) {
+    loop {
+        let start_wait = Instant::now();
+        tokio::select! {
+            _ = tokio::time::sleep_until(*wakeup_time) => {
+                break;
+            },
+        Ok(new_tick_us) = tick_update_rx.recv() => {
+            let now = Instant::now();
+            let elapsed_time = now - start_wait;
+            let elapsed_old_ticks = (elapsed_time.as_secs_f64() * 1_000_000.0) / *tick_us as f64;
+
+            let completed_old_ticks = elapsed_old_ticks.round() as u32;
+            remaining_ticks -= completed_old_ticks;
+
+            if new_tick_us > *tick_us {
+                *wakeup_time += Duration::from_micros((remaining_ticks * (new_tick_us - *tick_us)).into());
+            } else {
+                *wakeup_time -= Duration::from_micros((remaining_ticks * (*tick_us - new_tick_us)).into());
+            }
+
+            *tick_us = new_tick_us;
+        }
+        }
+    }
+}
 
 async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
@@ -107,38 +137,22 @@ async fn play_track<I: IntoIterator<Item = Event>>(
     start_barrier.wait().await;
 
     let ticks_per_beat = timing.ticks_per_beat;
-    let mut tick = timing.tick.as_micros() as u32;
+    let mut tick_us = timing.tick.as_micros() as u32;
 
     let mut tick_update_rx = tick_update_tx.subscribe();
 
     let mut next_time = Instant::now();
 
     for track_event in track {
-        next_time += track_event.delta * tick * MICROSECOND;
+        next_time += Duration::from_micros((track_event.delta * tick_us).into());
 
-        let start_wait = Instant::now();
-        loop {
-            tokio::select! {
-                _ = tokio::time::sleep_until(next_time) => {
-                    break;
-                },
-                Ok(new_tick) = tick_update_rx.recv() => {
-                    let now = Instant::now();
-                    let elapsed_old_ticks = (now - start_wait).as_micros() as f64 / tick as f64;
-
-                    let elapsed_old_ticks = elapsed_old_ticks.round() as u32;
-                    let remaining_new_ticks = track_event.delta - elapsed_old_ticks;
-
-                    if new_tick > tick {
-                        next_time += Duration::from_micros(remaining_new_ticks as u64 * (new_tick - tick) as u64)
-                    } else {
-                        next_time -= Duration::from_micros(remaining_new_ticks as u64 * (tick - new_tick) as u64)
-                    }
-
-                    tick = new_tick;
-                }
-            }
-        }
+        sleep_until(
+            &mut next_time,
+            track_event.delta,
+            &mut tick_us,
+            &mut tick_update_rx,
+        )
+        .await;
 
         if let Some(e) = track_event.kind {
             match e {
@@ -152,8 +166,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     /*
                     I'm unsure exactly why this is needed, but without
                     it the timing of the notes goes apeshit. I suspect
-                    it has to do with tokio::sleep_until only having
-                    millisecond granularity
+                    it has to do with tokio::sleep_until
                      */
                     tokio::time::sleep(Duration::from_nanos(1)).await;
 
@@ -176,7 +189,7 @@ async fn play_track<I: IntoIterator<Item = Event>>(
                     let us_per_tick_tempo_adjusted =
                         (us_per_beat as f64 / (ticks_per_beat as f64 * speed.tempo)) as u32;
 
-                    tick = us_per_tick_tempo_adjusted;
+                    tick_us = us_per_tick_tempo_adjusted;
                     drop(tick_update_rx);
                     tick_update_tx.send(us_per_tick_tempo_adjusted)?;
                     tick_update_rx = tick_update_tx.subscribe();
