@@ -52,6 +52,7 @@ fn key_to_frequency(key: u8) -> f64 {
     octave_8_freqs[note] / 2.0f64.powi(8 - octave)
 }
 
+#[derive(Debug, Clone, Copy)]
 struct InstrumentCount {
     current: usize,
     max: usize,
