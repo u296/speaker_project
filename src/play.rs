@@ -82,7 +82,7 @@ async fn handle_note_update(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut device_lock = device.lock().await;
     device_lock
-        .transmit_message_async((key_to_frequency(key) * pitch) as u16, vel)
+        .tone_update((key_to_frequency(key) * pitch) as u16, vel)
         .await?;
 
     drop(device_lock);

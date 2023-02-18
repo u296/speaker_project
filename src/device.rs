@@ -41,7 +41,7 @@ pub fn new(
 
 #[async_trait]
 pub trait Device {
-    async fn transmit_message_async(
+    async fn tone_update(
         &mut self,
         frequency: u16,
         vel: u8,
@@ -91,7 +91,7 @@ impl SerialDevice {
 
 #[async_trait]
 impl Device for SerialDevice {
-    async fn transmit_message_async(
+    async fn tone_update(
         &mut self,
         freq: u16,
         vel: u8,
@@ -117,7 +117,7 @@ pub struct DummyDevice;
 
 #[async_trait]
 impl Device for DummyDevice {
-    async fn transmit_message_async(
+    async fn tone_update(
         &mut self,
         _: u16,
         _: u8,
