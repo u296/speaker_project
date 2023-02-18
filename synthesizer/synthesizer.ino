@@ -19,6 +19,11 @@ the message begins with the byte 0x01
 the frequency. If 0 then off, anything else then on
  */
 
+enum MessageType
+{
+	NoteUpdate = 0x01
+};
+
 /* SPEAKER
 ****************
 A speaker represents a piezo or other sound-generating
@@ -122,7 +127,7 @@ void loop()
 
 	switch (buf[0])
 	{
-	case 0x01:
+	case NoteUpdate:
 	{
 		// reconstruct the message values
 		uint16_t frequency = ((uint16_t)buf[1] << 8) | ((uint16_t)buf[2]);
