@@ -20,9 +20,14 @@ the frequency. If 0 then off, anything else then on
 the message ends with the byte 0x01
  */
 
-enum MessageType
+enum class MessageType
 {
 	NoteUpdate = 0x01
+};
+
+enum class MessageLength
+{
+	NoteUpdate = 5
 };
 
 /* SPEAKER
@@ -33,6 +38,8 @@ is connected to one can derive the available hardware
 timers to be used and the channel, however this must be
 done manually by looking up the values in the datasheet
 of the STM32F411CEU6
+
+frequency = 0 indicates that the speaker is not in use
 */
 struct Speaker
 {
@@ -40,20 +47,32 @@ struct Speaker
 	int channel;
 	PinName pin_name;
 	int frequency = 0;
+
+	void play_frequency(int freq)
+	{
+		this->frequency = freq;
+		this->timer->setPWM(this->channel, this->pin_name, this->frequency, 50);
+	}
+
+	void turn_off()
+	{
+		this->frequency = 0;
+		this->timer->pause();
+	}
 };
 
 #define NUM_SPEAKERS 6
 Speaker speakers[NUM_SPEAKERS];
 
+#define BAUDRATE 250000
+
 // buffer used for receiving messages over serial
 #define SERIAL_BUFFER_LEN 64
-byte buf[SERIAL_BUFFER_LEN];
+byte serial_buf[SERIAL_BUFFER_LEN];
 uint8_t cursor_pos = 0;
 
-void setup()
+void setup_speakers()
 {
-	// set up the speakers
-
 	// PA2 TIM5 chan 3 (alt1)
 	speakers[0].pin_name = PA_2_ALT1;
 	speakers[0].channel = 3;
@@ -87,18 +106,26 @@ void setup()
 	speakers[5].pin_name = PB_6;
 	speakers[5].channel = 1;
 	speakers[5].timer = new HardwareTimer(TIM4);
+}
 
-	// introduce all the speakers by playing a separate note on each
+void test_speakers()
+{
 	for (int i = 0; i < NUM_SPEAKERS; i++)
 	{
-		speakers[i].timer->setPWM(speakers[i].channel, speakers[i].pin_name, 200 * pow(1.5, i), 50);
+		speakers[i].play_frequency(200 * pow(1.5, i));
 		delay(250);
-		speakers[i].timer->pause();
+		speakers[i].turn_off();
 	}
+}
 
-	pinMode(LED_BUILTIN, OUTPUT);	   // initialize the builtin LED
-	Serial.begin(250000);			   // initialize serial communication at 250 kBaud
-	memset(buf, 0, SERIAL_BUFFER_LEN); // zero the serial buffer
+void setup()
+{
+	setup_speakers();
+	test_speakers();
+
+	Serial.begin(BAUDRATE);
+	memset(serial_buf, 0, SERIAL_BUFFER_LEN);
+	pinMode(LED_BUILTIN, OUTPUT);
 }
 
 void wait_for_message()
@@ -110,23 +137,83 @@ void wait_for_message()
 	digitalWrite(LED_BUILTIN, LOW);
 }
 
-void loop()
+void read_from_serial()
 {
-	// read all the bytes, or fill the buffer
 	for (; cursor_pos < SERIAL_BUFFER_LEN && Serial.available(); cursor_pos++)
 	{
 		int incoming = Serial.read();
 		if (incoming != -1)
 		{
-			buf[cursor_pos] = (byte)incoming;
+			serial_buf[cursor_pos] = (byte)incoming;
 		}
 		else
 		{
 			// an error occurred
 		}
 	}
+}
 
-	switch (buf[0])
+void update_note(uint16_t frequency, uint8_t velocity)
+{
+	if (velocity == 0)
+	{
+		// turn off a speaker
+		for (int i = 0; i < NUM_SPEAKERS; i++)
+		{
+			if (speakers[i].frequency == frequency) // find the speaker generating the frequency
+			{
+				speakers[i].turn_off();
+				break;
+			}
+		}
+	}
+	else
+	{
+		// turn on a speaker
+		for (int i = 0; i < NUM_SPEAKERS; i++)
+		{
+			if (speakers[i].frequency == 0) // find a free speaker
+			{
+				speakers[i].play_frequency(frequency);
+				break;
+			}
+		}
+		/*	A speaker has now been assigned the
+			frequency that the message requested
+			if there was one available. If not
+			then that note will not be played.
+		*/
+	}
+}
+
+void pop_message(uint8_t message_length)
+{
+	/* move everything in the serial buffer to the left by message_length
+
+		A B C D E F G H I J K L M N O P
+					  ^
+		\_____/       |
+	  message_len   cursor
+
+		to
+
+		E F G H I J K L M N O P
+			  ^
+			  |
+			cursor
+
+		this removes the first message_length bytes from the array, and
+		the cursor will still point to the same value
+	*/
+	memmove(serial_buf, serial_buf + message_length, SERIAL_BUFFER_LEN - message_length);
+	cursor_pos -= message_length;
+}
+
+void loop()
+{
+	read_from_serial();
+
+	switch (serial_buf[0])
 	{
 	case 0:
 	{
@@ -136,56 +223,24 @@ void loop()
 		wait_for_message();
 		break;
 	}
-	case NoteUpdate:
+	case static_cast<uint8_t>(MessageType::NoteUpdate):
 	{
 		// 0x01 FF FF VV 0x01
 
 		// check that we have a complete message
-		if (buf[4] != 0x01)
+		if (serial_buf[4] != 0x01)
 		{
 			wait_for_message();
 			break;
 		}
 
 		// reconstruct the message values
-		uint16_t frequency = ((uint16_t)buf[1] << 8) | ((uint16_t)buf[2]);
-		uint8_t velocity = buf[3];
+		uint16_t frequency = ((uint16_t)serial_buf[1] << 8) | ((uint16_t)serial_buf[2]);
+		uint8_t velocity = serial_buf[3];
 
-		if (velocity == 0)
-		{
-			// turn off a speaker
-			for (int i = 0; i < NUM_SPEAKERS; i++)
-			{
-				if (speakers[i].frequency == frequency) // find the speaker generating the frequency
-				{
-					speakers[i].frequency = 0;	// indicate that the speaker is now free
-					speakers[i].timer->pause(); // pause the timer to stop generating the sound
-					break;
-				}
-			}
-		}
-		else
-		{
-			// turn on a speaker
-			for (int i = 0; i < NUM_SPEAKERS; i++)
-			{
-				if (speakers[i].frequency == 0) // find a free speaker
-				{
-					speakers[i].frequency = frequency;													 // indicate that it is now occupied
-					speakers[i].timer->setPWM(speakers[i].channel, speakers[i].pin_name, frequency, 50); // start playing sound
-					break;
-				}
-			}
-			/*	A speaker has now been assigned the
-				frequency that the message requested
-				if there was one available. If not
-				then that note will not be played.
-			*/
-		}
+		update_note(frequency, velocity);
 
-		// consume the message from the buffer
-		memmove(buf, buf + 5, SERIAL_BUFFER_LEN - 5);
-		cursor_pos -= 5;
+		pop_message(static_cast<uint8_t>(MessageLength::NoteUpdate));
 
 		break;
 	}
