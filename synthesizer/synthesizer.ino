@@ -214,16 +214,19 @@ void loop()
 {
 	read_from_serial();
 
+	if (cursor_pos == 0)
+	{
+		/*
+		after maybe reading, we are still about to write
+		to the first byte of the buffer. This means that
+		no bytes were written.
+		*/
+		wait_for_message();
+		return;
+	}
+
 	switch (serial_buf[0])
 	{
-	case 0:
-	{
-		// the first byte of the buffer hasn't been written, so
-		// there is no message and we can simply wait until the
-		// next message comes
-		wait_for_message();
-		break;
-	}
 	case static_cast<uint8_t>(MessageType::NoteUpdate):
 	{
 		// 0x01 FF FF VV 0x01
