@@ -9,7 +9,7 @@ only has a single message, to turn on or off a speaker
 with a certain frequency. that message is laid out as
 follows:
 
-0x01 FF FF VV
+0x01 FF FF VV 0x01
 
 multibyte values are sent in big endian format
 
@@ -17,6 +17,7 @@ the message begins with the byte 0x01
 	* F is a 16 bit unsigned integer representing the frequency
 	* V is an 8 bit unsigned integer containing the velocity, of
 the frequency. If 0 then off, anything else then on
+the message ends with the byte 0x01
  */
 
 enum MessageType
@@ -97,6 +98,7 @@ void setup()
 // buffer used for receiving messages over serial
 #define SERIAL_BUFFER_LEN 64
 byte buf[SERIAL_BUFFER_LEN];
+uint8_t cursor_pos = 0;
 
 void loop()
 {
@@ -110,6 +112,7 @@ void loop()
 
 	// clear the buffer
 	memset(buf, 0, SERIAL_BUFFER_LEN);
+	cursor_pos = 0;
 
 	// read all the bytes, or fill the buffer
 	for (int i = 0; i < SERIAL_BUFFER_LEN && Serial.available(); i++)
@@ -117,18 +120,27 @@ void loop()
 		int incoming = Serial.read();
 		if (incoming != -1)
 		{
-			buf[i] = (byte)incoming;
+			buf[cursor_pos] = (byte)incoming;
 		}
 		else
 		{
 			// an error occurred
 		}
+		cursor_pos += 1;
 	}
 
 	switch (buf[0])
 	{
 	case NoteUpdate:
 	{
+		// 0x01 FF FF VV 0x01
+
+		// check that we have a complete message
+		if (buf[4] != 0x01)
+		{
+			return;
+		}
+
 		// reconstruct the message values
 		uint16_t frequency = ((uint16_t)buf[1] << 8) | ((uint16_t)buf[2]);
 		uint8_t velocity = buf[3];

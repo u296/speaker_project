@@ -98,7 +98,7 @@ impl Device for SerialDevice {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let freq = freq.to_be_bytes();
 
-        let message: [u8; 4] = [0x01, freq[0], freq[1], vel];
+        let message: [u8; 5] = [0x01, freq[0], freq[1], vel, 0x01];
         let mut num_timed_out = 1;
         loop {
             match <_ as tokio::io::AsyncWriteExt>::write_all(&mut self.0, &message).await {

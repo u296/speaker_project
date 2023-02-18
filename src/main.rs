@@ -12,10 +12,9 @@ mod play;
 big endian transmission format
 first byte: message type
 0x01 : tone update
-0x02 :
 
 tone update message layout
-01 xx xx yy
+01 xx xx yy 01
 
 x: u16 tone
 y: u16 velocity
