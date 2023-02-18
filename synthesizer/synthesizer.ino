@@ -1,3 +1,4 @@
+// to get VScode to stop complaining
 typedef unsigned char byte;
 extern void digitalWrite(uint32_t, uint32_t);
 extern void pinMode(uint32_t, uint32_t);
