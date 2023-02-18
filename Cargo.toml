@@ -9,17 +9,36 @@ path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-tokio = { version = "1", features = [
-    "rt-multi-thread",
-    "io-util",
-    "time",
-    "macros",
-    "fs",
-    "sync",
-] }
-tokio-serial = "5"
-midly = "0.5"
-clap = { version = "4", features = ["derive"] }
-futures = "0.3"
-async-trait = "0.1"
+[dependencies.tokio]
+version = "1"
+default-features = false
+features = ["rt-multi-thread", "io-util", "time", "macros", "fs", "sync"]
+[dependencies.tokio-serial]
+version = "5"
+default-features = false
+features = []
+[dependencies.midly]
+version = "0.5"
+default-features = false
+features = ["alloc", "std", "parallel"]
+[dependencies.clap]
+version = "4"
+default-features = false
+features = [
+    "std",
+    "color",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions",
+    "unicode",
+    "derive",
+]
+[dependencies.futures]
+version = "0.3"
+default-features = false
+features = []
+[dependencies.async-trait]
+version = "0.1"
+default-features = false
+features = []
