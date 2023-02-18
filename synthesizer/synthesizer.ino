@@ -45,6 +45,11 @@ struct Speaker
 #define NUM_SPEAKERS 6
 Speaker speakers[NUM_SPEAKERS];
 
+// buffer used for receiving messages over serial
+#define SERIAL_BUFFER_LEN 64
+byte buf[SERIAL_BUFFER_LEN];
+uint8_t cursor_pos = 0;
+
 void setup()
 {
 	// set up the speakers
@@ -91,31 +96,24 @@ void setup()
 		speakers[i].timer->pause();
 	}
 
-	pinMode(LED_BUILTIN, OUTPUT); // initialize the builtin LED
-	Serial.begin(250000);		  // initialize serial communication at 250 kBaud
+	pinMode(LED_BUILTIN, OUTPUT);	   // initialize the builtin LED
+	Serial.begin(250000);			   // initialize serial communication at 250 kBaud
+	memset(buf, 0, SERIAL_BUFFER_LEN); // zero the serial buffer
 }
 
-// buffer used for receiving messages over serial
-#define SERIAL_BUFFER_LEN 64
-byte buf[SERIAL_BUFFER_LEN];
-uint8_t cursor_pos = 0;
-
-void loop()
+void wait_for_message()
 {
-	// wait until there is a message available
+	digitalWrite(LED_BUILTIN, HIGH);
 	while (!Serial.available())
 	{
 	}
-
-	// turn on the LED, it is active LOW
 	digitalWrite(LED_BUILTIN, LOW);
+}
 
-	// clear the buffer
-	memset(buf, 0, SERIAL_BUFFER_LEN);
-	cursor_pos = 0;
-
+void loop()
+{
 	// read all the bytes, or fill the buffer
-	for (int i = 0; i < SERIAL_BUFFER_LEN && Serial.available(); i++)
+	for (; cursor_pos < SERIAL_BUFFER_LEN && Serial.available(); cursor_pos++)
 	{
 		int incoming = Serial.read();
 		if (incoming != -1)
@@ -126,11 +124,18 @@ void loop()
 		{
 			// an error occurred
 		}
-		cursor_pos += 1;
 	}
 
 	switch (buf[0])
 	{
+	case 0:
+	{
+		// the first byte of the buffer hasn't been written, so
+		// there is no message and we can simply wait until the
+		// next message comes
+		wait_for_message();
+		break;
+	}
 	case NoteUpdate:
 	{
 		// 0x01 FF FF VV 0x01
@@ -138,7 +143,8 @@ void loop()
 		// check that we have a complete message
 		if (buf[4] != 0x01)
 		{
-			return;
+			wait_for_message();
+			break;
 		}
 
 		// reconstruct the message values
@@ -177,10 +183,13 @@ void loop()
 			*/
 		}
 
+		// consume the message from the buffer
+		memmove(buf, buf + 5, SERIAL_BUFFER_LEN - 5);
+		cursor_pos -= 5;
+
 		break;
 	}
 	default:
 		break;
 	}
-	digitalWrite(LED_BUILTIN, HIGH); // turn off the LED again
 }
