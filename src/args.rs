@@ -1,5 +1,5 @@
 use clap::{command, ArgGroup, Parser};
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 #[derive(Parser)]
 #[command(group(
@@ -12,6 +12,9 @@ struct RawArgs {
     file: PathBuf,
     #[arg(short, long, default_value_t = 250000)]
     baudrate: u32,
+
+    #[arg(short = 't', long)]
+    assume_initial_tick: Option<u64>,
 
     #[arg(long, num_args = 1..)]
     tracks: Vec<usize>,
@@ -50,6 +53,7 @@ pub struct Args {
     pub tracks: Vec<usize>,
     pub dry_run: bool,
     pub speed: Speed,
+    pub initial_tick: Option<Duration>,
 }
 
 impl Args {
@@ -79,6 +83,7 @@ impl Args {
             tracks: args.tracks,
             dry_run: args.dry,
             speed,
+            initial_tick: args.assume_initial_tick.map(Duration::from_micros),
         }
     }
 }

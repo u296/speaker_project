@@ -24,8 +24,12 @@ y: u16 velocity
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = args::Args::parse();
 
-    let midi_sequence =
-        MidiSequence::parse_file(&args.file_path, args.tracks.iter().copied()).await?;
+    let midi_sequence = MidiSequence::parse_file(
+        &args.file_path,
+        args.tracks.iter().copied(),
+        args.initial_tick,
+    )
+    .await?;
 
     let device = device::new(args.baud_rate, args.dry_run)?;
 

@@ -8,20 +8,29 @@ pub struct Timing {
     pub tick: Duration,
 }
 
-pub fn deduce_timing(timing: &midly::Timing) -> Timing {
+pub fn deduce_timing(timing: &midly::Timing, initial_tick: Option<Duration>) -> Timing {
     match timing {
         midly::Timing::Metrical(a) => {
             println!("timing = metrical: {a}");
 
             let ticks_per_beat = <midly::num::u15 as Into<u16>>::into(*a).into();
-            let tick = Duration::from_micros(500);
 
             println!("ticks per beat: {ticks_per_beat}");
-            println!("assuming initial tick: {} µs", tick.as_micros());
+            if let Some(override_tick) = initial_tick {
+                println!("using provided tick: {} µs", override_tick.as_micros());
 
-            Timing {
-                ticks_per_beat,
-                tick,
+                Timing {
+                    ticks_per_beat,
+                    tick: override_tick,
+                }
+            } else {
+                let tick = Duration::from_micros(500);
+                println!("assuming initial tick: {} µs", tick.as_micros());
+
+                Timing {
+                    ticks_per_beat,
+                    tick,
+                }
             }
         }
         midly::Timing::Timecode(fps, subframe) => {
@@ -31,11 +40,23 @@ pub fn deduce_timing(timing: &midly::Timing) -> Timing {
             let tick = Duration::from_micros(1000000 / (fps.as_int() as u64 * *subframe as u64));
 
             println!("ticks per beat: {ticks_per_beat}");
-            println!("initial tick: {} µs", tick.as_micros());
+            if let Some(override_tick) = initial_tick {
+                println!(
+                    "found initial tick: {} µs but using provided tick of {} µs",
+                    tick.as_micros(),
+                    override_tick.as_micros()
+                );
+                Timing {
+                    ticks_per_beat,
+                    tick: override_tick,
+                }
+            } else {
+                println!("initial tick: {} µs", tick.as_micros());
 
-            Timing {
-                ticks_per_beat,
-                tick,
+                Timing {
+                    ticks_per_beat,
+                    tick,
+                }
             }
         }
     }
@@ -122,12 +143,13 @@ impl MidiSequence {
     pub async fn parse_file(
         path: impl AsRef<Path>,
         track_indices: impl IntoIterator<Item = usize>,
+        initial_tick: Option<Duration>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let file_buf = tokio::fs::read(path).await?;
 
         let raw_midi = Smf::parse(&file_buf)?;
 
-        let timing = deduce_timing(&raw_midi.header.timing);
+        let timing = deduce_timing(&raw_midi.header.timing, initial_tick);
 
         println!(
             "file contains {} track(s), listing...",
