@@ -100,14 +100,6 @@ async fn handle_note_update(
     }
     drop(instrument_count_lock);
 
-    /*
-    unsure why this is necessary, but removing it
-    makes the notes very inconsistent and some of
-    them don't turn off. I suspect it has to do with
-    tokio::time::sleep_until
-    */
-    tokio::time::sleep(Duration::from_nanos(1)).await;
-
     Ok(())
 }
 
