@@ -28,6 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         &args.file_path,
         args.tracks.map(|x| x.into_iter()),
         args.initial_tick,
+        args.list,
     )
     .await?;
 

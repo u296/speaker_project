@@ -144,6 +144,7 @@ impl MidiSequence {
         path: impl AsRef<Path>,
         track_indices: Option<impl Iterator<Item = usize>>,
         initial_tick: Option<Duration>,
+        list: bool,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let file_buf = tokio::fs::read(path).await?;
 
@@ -164,6 +165,11 @@ impl MidiSequence {
             println!("{i:<2} - name: {name:<32} - instrument: {instrument}");
         }
 
+        if list {
+            println!("list run, quitting...");
+            exit(0);
+        }
+
         let play_tracks = if let Some(track_indices) = track_indices {
             track_indices
                 .into_iter()
@@ -176,13 +182,6 @@ impl MidiSequence {
                 .map(|raw_track| convert::<_, Vec<_>>(raw_track.iter()))
                 .collect::<Vec<_>>()
         };
-
-        if play_tracks.is_empty() {
-            println!("no tracks specified. Quitting");
-            exit(0);
-        }
-
-        // no postprocessing, all tracks including tempo track will start at the same time
 
         Ok(Self {
             tracks: play_tracks,

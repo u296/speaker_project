@@ -22,6 +22,9 @@ struct RawArgs {
     #[arg(short, long)]
     dry: bool,
 
+    #[arg(short, long)]
+    list: bool,
+
     #[arg(
         long,
         allow_negative_numbers = true,
@@ -54,6 +57,7 @@ pub struct Args {
     pub dry_run: bool,
     pub speed: Speed,
     pub initial_tick: Option<Duration>,
+    pub list: bool,
 }
 
 impl Args {
@@ -84,6 +88,7 @@ impl Args {
             dry_run: args.dry,
             speed,
             initial_tick: args.assume_initial_tick.map(Duration::from_micros),
+            list: args.list,
         }
     }
 }
