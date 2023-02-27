@@ -24,12 +24,12 @@ pub fn deduce_timing(timing: &midly::Timing, initial_tick: Option<Duration>) -> 
                     tick: override_tick,
                 }
             } else {
-                let tick = Duration::from_micros(500);
-                println!("assuming initial tick: {} µs", tick.as_micros());
+                let assumed_tick = Duration::from_micros(500);
+                println!("assuming initial tick: {} µs", assumed_tick.as_micros());
 
                 Timing {
                     ticks_per_beat,
-                    tick,
+                    tick: assumed_tick,
                 }
             }
         }
