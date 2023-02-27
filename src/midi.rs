@@ -142,7 +142,7 @@ pub struct MidiSequence {
 impl MidiSequence {
     pub async fn parse_file(
         path: impl AsRef<Path>,
-        track_indices: impl IntoIterator<Item = usize>,
+        track_indices: Option<impl Iterator<Item = usize>>,
         initial_tick: Option<Duration>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let file_buf = tokio::fs::read(path).await?;
@@ -164,10 +164,18 @@ impl MidiSequence {
             println!("{i:<2} - name: {name:<32} - instrument: {instrument}");
         }
 
-        let play_tracks = track_indices
-            .into_iter()
-            .map(|n| convert::<_, Vec<_>>(raw_midi.tracks[n].iter()))
-            .collect::<Vec<_>>();
+        let play_tracks = if let Some(track_indices) = track_indices {
+            track_indices
+                .into_iter()
+                .map(|n| convert::<_, Vec<_>>(raw_midi.tracks[n].iter()))
+                .collect::<Vec<_>>()
+        } else {
+            raw_midi
+                .tracks
+                .iter()
+                .map(|raw_track| convert::<_, Vec<_>>(raw_track.iter()))
+                .collect::<Vec<_>>()
+        };
 
         if play_tracks.is_empty() {
             println!("no tracks specified. Quitting");

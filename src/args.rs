@@ -17,7 +17,7 @@ struct RawArgs {
     assume_initial_tick: Option<u64>,
 
     #[arg(long, num_args = 1..)]
-    tracks: Vec<usize>,
+    tracks: Option<Vec<usize>>,
 
     #[arg(short, long)]
     dry: bool,
@@ -50,7 +50,7 @@ pub struct Speed {
 pub struct Args {
     pub file_path: PathBuf,
     pub baud_rate: u32,
-    pub tracks: Vec<usize>,
+    pub tracks: Option<Vec<usize>>,
     pub dry_run: bool,
     pub speed: Speed,
     pub initial_tick: Option<Duration>,

@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let midi_sequence = MidiSequence::parse_file(
         &args.file_path,
-        args.tracks.iter().copied(),
+        args.tracks.map(|x| x.into_iter()),
         args.initial_tick,
     )
     .await?;
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let instrument_count = Arc::new(Mutex::new(InstrumentCount { current: 0, max: 0 }));
 
-    let barrier = Arc::new(Barrier::new(args.tracks.len()));
+    let barrier = Arc::new(Barrier::new(midi_sequence.tracks.len()));
     let (sender, _) = broadcast::channel(8);
 
     let f = futures::future::join_all(midi_sequence.tracks.into_iter().map(|track| {
