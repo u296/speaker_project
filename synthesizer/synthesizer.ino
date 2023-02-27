@@ -74,39 +74,39 @@ uint8_t cursor_pos = 0;
 
 void setup_speakers()
 {
-	// PA2 TIM5 chan 3 (alt1)
-	speakers[0].pin_name = PA_2_ALT1;
-	speakers[0].channel = 3;
-	speakers[0].timer = new HardwareTimer(TIM5);
-
-	// PA6 TIM3 chan 1
-
-	speakers[1].pin_name = PA_6;
-	speakers[1].channel = 1;
-	speakers[1].timer = new HardwareTimer(TIM3);
-
-	// PA 1 TIM2 chan 2
-
-	speakers[2].pin_name = PA_1;
-	speakers[2].channel = 2;
-	speakers[2].timer = new HardwareTimer(TIM2);
-
-	// PA 3 TIM 9 chan 2 alt 2
-
-	speakers[3].pin_name = PA_3_ALT2;
-	speakers[3].channel = 2;
-	speakers[3].timer = new HardwareTimer(TIM9);
-
 	// PA 8 TIM 1 chan 1
-	speakers[4].pin_name = PA_8;
-	speakers[4].channel = 1;
-	speakers[4].timer = new HardwareTimer(TIM1);
+	speakers[0].pin_name = PA_8;
+	speakers[0].channel = 1;
+	speakers[0].timer = new HardwareTimer(TIM1);
 
 	// PB 6 TIM 4 chan 1
 
-	speakers[5].pin_name = PB_6;
+	speakers[1].pin_name = PB_6;
+	speakers[1].channel = 1;
+	speakers[1].timer = new HardwareTimer(TIM4);
+
+	// PA 3 TIM 9 chan 2 alt 2
+
+	speakers[2].pin_name = PA_3_ALT2;
+	speakers[2].channel = 2;
+	speakers[2].timer = new HardwareTimer(TIM9);
+
+	// PA 1 TIM2 chan 2
+
+	speakers[3].pin_name = PA_1;
+	speakers[3].channel = 2;
+	speakers[3].timer = new HardwareTimer(TIM2);
+
+	// PA2 TIM5 chan 3 (alt1)
+	speakers[4].pin_name = PA_2_ALT1;
+	speakers[4].channel = 3;
+	speakers[4].timer = new HardwareTimer(TIM5);
+
+	// PA6 TIM3 chan 1
+
+	speakers[5].pin_name = PA_6;
 	speakers[5].channel = 1;
-	speakers[5].timer = new HardwareTimer(TIM4);
+	speakers[5].timer = new HardwareTimer(TIM3);
 }
 
 void test_speakers()
