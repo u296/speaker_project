@@ -17,7 +17,7 @@ multi-thread = ["tokio/rt-multi-thread"]
 [dependencies.tokio]
 version = "1"
 default-features = false
-features = ["io-util", "time", "macros", "fs", "sync"]
+features = ["io-util", "time", "macros", "fs", "sync", "signal"]
 
 [dependencies.tokio-serial]
 version = "5"

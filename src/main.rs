@@ -1,7 +1,10 @@
 use crate::device::Device;
 use midi::MidiSequence;
 use play::{play_track, InstrumentCount};
-use std::sync::Arc;
+use std::{
+    process::exit,
+    sync::{Arc, Weak},
+};
 use tokio::sync::{broadcast, Barrier, Mutex};
 
 mod args;
@@ -62,6 +65,8 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let barrier = Arc::new(Barrier::new(midi_sequence.tracks.len()));
     let (sender, _) = broadcast::channel(8);
 
+    tokio::spawn(handle_ctrlc(Arc::downgrade(&device)));
+
     let f = futures::future::join_all(midi_sequence.tracks.into_iter().map(|track| {
         tokio::task::spawn(play_track(
             track,
@@ -79,6 +84,21 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
+    }
+
+    Ok(())
+}
+
+async fn handle_ctrlc(
+    device: Weak<DeviceMutex>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    tokio::signal::ctrl_c().await?;
+
+    if let Some(arc) = device.upgrade() {
+        let mut device_lock = arc.lock().await;
+        device_lock.reset().await?;
+
+        exit(0);
     }
 
     Ok(())
