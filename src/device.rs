@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tokio_serial::SerialStream;
 
+use crate::DeviceMutex;
+
 fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: Fn(&T) -> bool>(
     prompt: &str,
     parse: Parser,
@@ -30,7 +32,7 @@ fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: 
 pub fn new(
     baud_rate: u32,
     dummy_device: bool,
-) -> Result<Arc<Mutex<dyn Device + Send + Sync>>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Arc<DeviceMutex>, Box<dyn std::error::Error + Send + Sync>> {
     if dummy_device {
         println!("using dummy device");
         Ok(Arc::new(Mutex::new(DummyDevice)))
@@ -51,7 +53,7 @@ pub trait Device {
 pub struct SerialDevice(SerialStream);
 
 impl SerialDevice {
-    pub fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+    pub fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let ports = tokio_serial::available_ports()?;
 
         println!("listing available serial ports...");
@@ -74,8 +76,20 @@ impl SerialDevice {
             }
         };
 
-        let dev_name = ports[selection].port_name.split('/').last().unwrap();
-        let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
+        #[cfg(target_family = "unix")]
+        let (dev_name, dev_path) = {
+            let dev_name = ports[selection].port_name.split('/').last().unwrap();
+            let dev_path: PathBuf = ["/dev", dev_name].iter().collect();
+
+            (dev_name, dev_path)
+        };
+        #[cfg(target_family = "windows")]
+        let (dev_name, dev_path) = {
+            let dev_name = ports[selection].port_name.clone();
+            let dev_path: PathBuf = dev_name.clone().into();
+
+            (dev_name, dev_path)
+        };
 
         println!("selected device {dev_name}");
 

@@ -1,3 +1,4 @@
+use crate::device::Device;
 use midi::MidiSequence;
 use play::{play_track, InstrumentCount};
 use std::sync::Arc;
@@ -7,6 +8,14 @@ mod args;
 mod device;
 mod midi;
 mod play;
+
+#[cfg(all(feature = "single-thread", feature = "multi-thread"))]
+compile_error!("single-thread and multi-thread are mutually exclusive features");
+
+#[cfg(feature = "multi-thread")]
+type DeviceMutex = Mutex<dyn Device + Send + Sync>;
+#[cfg(feature = "single-thread")]
+type DeviceMutex = Mutex<dyn Device + Send>;
 
 /* message format sent to device
 big endian transmission format
@@ -20,8 +29,22 @@ x: u16 tone
 y: u16 velocity
  */
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "single-thread")]
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    #[cfg(feature = "multi-thread")]
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    rt.block_on(async_main()).unwrap();
+
+    Ok(())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = args::Args::parse();
 
     let midi_sequence = MidiSequence::parse_file(

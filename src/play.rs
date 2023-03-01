@@ -5,7 +5,7 @@ use tokio::{
     time::Instant,
 };
 
-use crate::{args::Speed, device::Device, midi::Event};
+use crate::{args::Speed, midi::Event, DeviceMutex};
 
 #[derive(Debug, Clone, Copy)]
 pub struct InstrumentCount {
@@ -74,7 +74,7 @@ async fn sleep_until(
 }
 
 async fn handle_note_update(
-    device: Arc<Mutex<dyn Device + Send + Sync>>,
+    device: Arc<DeviceMutex>,
     key: u8,
     vel: u8,
     instrument_count: Arc<Mutex<InstrumentCount>>,
@@ -122,7 +122,7 @@ async fn handle_tempo_update(
 pub async fn play_track<I: IntoIterator<Item = Event>>(
     track: I,
     timing: crate::midi::Timing,
-    device: Arc<Mutex<dyn Device + Send + Sync>>,
+    device: Arc<DeviceMutex>,
     instrument_count: Arc<Mutex<InstrumentCount>>,
     speed: Speed,
     start_barrier: Arc<Barrier>,
