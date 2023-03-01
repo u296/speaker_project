@@ -28,14 +28,23 @@ layout:
 enum class MessageType
 {
 	NoteUpdate = 0x01,
-	Reset = 0x02
+	Reset = 0x02,
+	GetId = 0x03,
 };
 
 enum class MessageLength
 {
 	NoteUpdate = 5,
-	Reset = 1
+	Reset = 1,
+	GetId = 1
 };
+
+#define ID_LEN 4
+const byte id[4] = {
+	0x61,
+	0xd8,
+	0x6e,
+	0x1c};
 
 /* SPEAKER
 ****************
@@ -270,6 +279,21 @@ void loop()
 		}
 
 		pop_message(static_cast<uint8_t>(MessageLength::Reset));
+	}
+	case static_cast<uint8_t>(MessageType::GetId):
+	{
+		// 0x03
+
+		if (cursor_pos < static_cast<uint8_t>(MessageLength::GetId))
+		{
+			wait_for_message();
+			break;
+		}
+
+		Serial.write(id, ID_LEN);
+		Serial.flush();
+
+		pop_message(static_cast<uint8_t>(MessageLength::GetId));
 	}
 	default:
 		break;

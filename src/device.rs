@@ -1,4 +1,4 @@
-use std::{io::Write, path::PathBuf, str::FromStr, sync::Arc};
+use std::{io::Write, path::PathBuf, process::exit, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -29,15 +29,18 @@ fn read_input<T, ParseError, Parser: Fn(&str) -> Result<T, ParseError>, Filter: 
     }
 }
 
-pub fn new(
+pub async fn new(
     baud_rate: u32,
     dummy_device: bool,
+    ignore_id: bool,
 ) -> Result<Arc<DeviceMutex>, Box<dyn std::error::Error + Send + Sync>> {
     if dummy_device {
         println!("using dummy device");
         Ok(Arc::new(Mutex::new(DummyDevice)))
     } else {
-        Ok(Arc::new(Mutex::new(SerialDevice::new(baud_rate)?)))
+        Ok(Arc::new(Mutex::new(
+            SerialDevice::new(baud_rate, ignore_id).await?,
+        )))
     }
 }
 
@@ -50,12 +53,19 @@ pub trait Device {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     async fn reset(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn verify_id(
+        &mut self,
+    ) -> Result<Result<(), [u8; 4]>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
+const MAGIC_ID: [u8; 4] = [0x61, 0xd8, 0x6e, 0x1c];
 pub struct SerialDevice(SerialStream);
 
 impl SerialDevice {
-    pub fn new(baud_rate: u32) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(
+        baud_rate: u32,
+        ignore_id: bool,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let ports = tokio_serial::available_ports()?;
 
         println!("listing available serial ports...");
@@ -98,10 +108,40 @@ impl SerialDevice {
         println!("baudrate: {baud_rate}");
         println!("opening device at {}", dev_path.to_string_lossy());
 
-        Ok(Self(SerialStream::open(&tokio_serial::new(
+        let mut dev = Self(SerialStream::open(&tokio_serial::new(
             dev_path.to_string_lossy(),
             baud_rate,
-        ))?))
+        ))?);
+
+        match dev.verify_id().await {
+            Ok(r) => match r {
+                Ok(_) => {
+                    print!("device answered with correct ID: ");
+                    for byte in MAGIC_ID.iter() {
+                        print!("{:X}", *byte);
+                    }
+                    println!("");
+                }
+                Err(response) => {
+                    print!("device answered with incorrect ID: ");
+                    for byte in response.iter() {
+                        print!("{:X}", *byte);
+                    }
+                    println!("");
+                    if ignore_id {
+                        println!("ignoring")
+                    } else {
+                        exit(1);
+                    }
+                }
+            },
+            Err(e) => {
+                println!("device failed to answer ID: {e}");
+                exit(1);
+            }
+        }
+
+        Ok(dev)
     }
 }
 
@@ -110,6 +150,7 @@ big endian transmission format
 first byte: message type
 0x01 : tone update
 0x02 : reset
+0x03 : get id
 
 tone update message layout
 01 xx xx yy 01
@@ -120,6 +161,15 @@ y: u16 velocity
 reset message layout
 
 02
+
+get id message layout
+
+03
+
+RESPONSE: 4 bytes
+
+61 d8 6e 1c
+
  */
 
 #[async_trait]
@@ -152,6 +202,23 @@ impl Device for SerialDevice {
             .await
             .map_err(|e| e.into())
     }
+
+    async fn verify_id(
+        &mut self,
+    ) -> Result<Result<(), [u8; 4]>, Box<dyn std::error::Error + Send + Sync>> {
+        let message: [u8; 1] = [0x3];
+
+        let mut buf: [u8; 4] = [0; 4];
+
+        <_ as tokio::io::AsyncWriteExt>::write_all(&mut self.0, &message).await?;
+        <_ as tokio::io::AsyncReadExt>::read_exact(&mut self.0, &mut buf).await?;
+
+        if buf == MAGIC_ID {
+            Ok(Ok(()))
+        } else {
+            Ok(Err(buf))
+        }
+    }
 }
 
 pub struct DummyDevice;
@@ -168,5 +235,11 @@ impl Device for DummyDevice {
 
     async fn reset(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
+    }
+
+    async fn verify_id(
+        &mut self,
+    ) -> Result<Result<(), [u8; 4]>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Ok(()))
     }
 }

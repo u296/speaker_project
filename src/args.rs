@@ -25,6 +25,9 @@ struct RawArgs {
     #[arg(short, long)]
     list: bool,
 
+    #[arg(long)]
+    ignore_id: bool,
+
     #[arg(
         long,
         allow_negative_numbers = true,
@@ -58,6 +61,7 @@ pub struct Args {
     pub speed: Speed,
     pub initial_tick: Option<Duration>,
     pub list: bool,
+    pub ignore_id: bool,
 }
 
 impl Args {
@@ -89,6 +93,7 @@ impl Args {
             speed,
             initial_tick: args.assume_initial_tick.map(Duration::from_micros),
             list: args.list,
+            ignore_id: args.ignore_id,
         }
     }
 }

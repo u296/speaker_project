@@ -58,7 +58,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .await?;
 
-    let device = device::new(args.baud_rate, args.dry_run)?;
+    let device = device::new(args.baud_rate, args.dry_run, args.ignore_id).await?;
 
     let instrument_count = Arc::new(Mutex::new(InstrumentCount { current: 0, max: 0 }));
 
