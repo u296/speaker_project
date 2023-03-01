@@ -5,30 +5,36 @@ extern void pinMode(uint32_t, uint32_t);
 
 /*	PROTOCOL
 ****************
-the protocol used to communicate with the computer
-only has a single message, to turn on or off a speaker
-with a certain frequency. that message is laid out as
-follows:
+multibyte values are sent in big endian format
+
+update message: turn on or off a speaker
+with a certain frequency.
+layout:
 
 0x01 FF FF VV 0x01
-
-multibyte values are sent in big endian format
 
 the message begins with the byte 0x01
 	* F is a 16 bit unsigned integer representing the frequency
 	* V is an 8 bit unsigned integer containing the velocity, of
 the frequency. If 0 then off, anything else then on
 the message ends with the byte 0x01
+
+reset message: turn off all speakers
+layout:
+
+0x02
  */
 
 enum class MessageType
 {
-	NoteUpdate = 0x01
+	NoteUpdate = 0x01,
+	Reset = 0x02
 };
 
 enum class MessageLength
 {
-	NoteUpdate = 5
+	NoteUpdate = 5,
+	Reset = 1
 };
 
 /* SPEAKER
@@ -232,7 +238,7 @@ void loop()
 		// 0x01 FF FF VV 0x01
 
 		// check that we have a complete message
-		if (serial_buf[4] != 0x01)
+		if (cursor_pos < static_cast<uint8_t>(MessageLength::NoteUpdate))
 		{
 			wait_for_message();
 			break;
@@ -247,6 +253,23 @@ void loop()
 		pop_message(static_cast<uint8_t>(MessageLength::NoteUpdate));
 
 		break;
+	}
+	case static_cast<uint8_t>(MessageType::Reset):
+	{
+		// 0x02
+
+		if (cursor_pos < static_cast<uint8_t>(MessageLength::Reset))
+		{
+			wait_for_message();
+			break;
+		}
+
+		for (int i = 0; i < NUM_SPEAKERS; i++)
+		{
+			speakers[i].turn_off();
+		}
+
+		pop_message(static_cast<uint8_t>(MessageLength::Reset));
 	}
 	default:
 		break;

@@ -48,6 +48,8 @@ pub trait Device {
         frequency: u16,
         vel: u8,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    async fn reset(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 pub struct SerialDevice(SerialStream);
@@ -103,6 +105,23 @@ impl SerialDevice {
     }
 }
 
+/* message format sent to device
+big endian transmission format
+first byte: message type
+0x01 : tone update
+0x02 : reset
+
+tone update message layout
+01 xx xx yy 01
+
+x: u16 tone
+y: u16 velocity
+
+reset message layout
+
+02
+ */
+
 #[async_trait]
 impl Device for SerialDevice {
     async fn tone_update(
@@ -125,6 +144,14 @@ impl Device for SerialDevice {
             num_timed_out += 1;
         }
     }
+
+    async fn reset(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let message: [u8; 1] = [0x2];
+
+        <_ as tokio::io::AsyncWriteExt>::write_all(&mut self.0, &message)
+            .await
+            .map_err(|e| e.into())
+    }
 }
 
 pub struct DummyDevice;
@@ -136,6 +163,10 @@ impl Device for DummyDevice {
         _: u16,
         _: u8,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+    async fn reset(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
 }
