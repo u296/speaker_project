@@ -11,7 +11,7 @@ update message: turn on or off a speaker
 with a certain frequency.
 layout:
 
-0x01 FF FF VV 0x01
+01 FF FF VV 01
 
 the message begins with the byte 0x01
 	* F is a 16 bit unsigned integer representing the frequency
@@ -22,7 +22,16 @@ the message ends with the byte 0x01
 reset message: turn off all speakers
 layout:
 
-0x02
+02
+
+get id message: return the magic ID over serial
+layout:
+
+03
+
+send back: 61 d8 6e 1c
+
+this is stored in id
  */
 
 enum class MessageType
