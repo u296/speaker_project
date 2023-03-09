@@ -7,6 +7,7 @@ extern void pinMode(uint32_t, uint32_t);
 ****************
 multibyte values are sent in big endian format
 
+****************
 update message: turn on or off a speaker
 with a certain frequency.
 layout:
@@ -18,12 +19,12 @@ the message begins with the byte 0x01
 	* V is an 8 bit unsigned integer containing the velocity, of
 the frequency. If 0 then off, anything else then on
 the message ends with the byte 0x01
-
+****************
 reset message: turn off all speakers
 layout:
 
 02
-
+****************
 get id message: return the magic ID over serial
 layout:
 
@@ -31,7 +32,7 @@ layout:
 
 send back: 61 d8 6e 1c
 
-this is stored in id
+these bytes are stored in "id"
  */
 
 enum class MessageType
@@ -64,7 +65,7 @@ timers to be used and the channel, however this must be
 done manually by looking up the values in the datasheet
 of the STM32F411CEU6
 
-frequency = 0 indicates that the speaker is not in use
+frequency == 0 indicates that the speaker is not in use
 */
 struct Speaker
 {
@@ -155,6 +156,11 @@ void setup()
 
 void wait_for_message()
 {
+	/*
+	Note: the built in led is active low, that means that
+	when you write LOW to it it will turn on, and writing
+	HIGH to it will turn it off
+	*/
 	digitalWrite(LED_BUILTIN, HIGH);
 	while (!Serial.available())
 	{
